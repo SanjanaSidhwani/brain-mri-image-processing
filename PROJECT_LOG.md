@@ -34,3 +34,28 @@ Project foundation initialized and ready for environment setup.
 
 ### Outcome
 Stable and reproducible development environment configured.
+
+## Step 3 – Dataset Structure Validation
+
+**Branch:** sanjana-sidhwani  
+**Status:** Completed  
+
+### Actions
+- Downloaded BraTS 2020 dataset (Abnormal class)
+- Verified patient-wise folder structure
+- Confirmed availability of FLAIR modality and segmentation masks
+- Loaded sample BraTS FLAIR volume using NiBabel
+- Observed volume shape: (240, 240, 155)
+- Verified data type: float64
+- Confirmed intensity range: 0 – 625
+
+- Downloaded OASIS dataset (Normal class)
+- Verified NIfTI volume structure
+- Loaded sample OASIS volume using NiBabel
+- Observed volume shape: (176, 208, 176, 1)
+- Verified data type: float64
+- Confirmed intensity range: 0 – 2870
+- Identified extra singleton dimension requiring squeeze to 3D
+
+### Outcome
+Both datasets successfully validated and confirmed compatible with the planned 3D MRI preprocessing pipeline.
