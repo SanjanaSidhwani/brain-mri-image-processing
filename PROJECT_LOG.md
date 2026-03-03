@@ -95,3 +95,14 @@ Successfully converted 3D MRI volumes into meaningful 2D axial slices, reducing 
 
 ### Outcome
 Successfully constructed structured slice-level dataset records with complete metadata, enabling safe training, validation splitting, and future patient-level aggregation.
+
+## Step 5 – Patient-Level Safe Dataset Splitting (Completed)
+
+### Actions
+- Implemented patient-level dataset splitting mechanism
+- Ensured all slices from a patient belong to the same split
+- Added reproducible shuffling using fixed random seed
+- Prevented slice-level data leakage
+
+### Outcome
+Dataset is now safely split into training and validation sets at the patient level, ensuring reliable model evaluation and preventing leakage.
