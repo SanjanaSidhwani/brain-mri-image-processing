@@ -106,3 +106,15 @@ Successfully constructed structured slice-level dataset records with complete me
 
 ### Outcome
 Dataset is now safely split into training and validation sets at the patient level, ensuring reliable model evaluation and preventing leakage.
+
+## Step 6 – Input Transformation Layer (Completed)
+
+### Actions
+- Implemented patient-grouped indexing for neighbor lookup
+- Developed 2.5D slice stacking mechanism
+- Handled boundary conditions with zero-padding
+- Added resizing utility for CNN compatibility
+- Validated final input shape consistency
+
+### Outcome
+Successfully transformed slice-level dataset into model-ready 2.5D inputs with standardized spatial dimensions.
