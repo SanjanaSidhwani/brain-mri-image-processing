@@ -96,6 +96,19 @@ Successfully converted 3D MRI volumes into meaningful 2D axial slices, reducing 
 ### Outcome
 Successfully constructed structured slice-level dataset records with complete metadata, enabling safe training, validation splitting, and future patient-level aggregation.
 
+### Enhancement – Dataset Record Serialization
+
+### Actions
+- Implemented dataset record serialization for persistent storage
+- Created utility script `src/utils/build_dataset_records.py`
+- Added support for compressed dataset storage using gzip
+- Enabled reuse of preconstructed slice records across multiple training runs
+- Eliminated need to rebuild dataset pipeline during every training execution
+
+### Outcome
+Dataset slice records can now be serialized and stored on disk as `dataset_records.pkl.gz`.  
+This significantly reduces training startup time by allowing the training pipeline to directly load preprocessed dataset records instead of reconstructing them from raw MRI volumes.
+
 ## Step 5 – Patient-Level Safe Dataset Splitting (Completed)
 
 ### Actions
