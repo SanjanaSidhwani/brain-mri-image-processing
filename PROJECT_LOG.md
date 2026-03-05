@@ -156,3 +156,17 @@ The model definition is modular, Grad-CAM compatible, and validated through unit
 
 ### Outcome
 Successfully implemented the dataset loader responsible for feeding MRI slice data into the training pipeline. The loader integrates dataset records, input transformations, and PyTorch batching utilities, enabling efficient data delivery to the CNN model during training.
+
+## Step 8.2 – Training Loop Implementation (Completed)
+
+### Actions
+- Implemented modular training loop inside src/training/trainer.py
+- Integrated model, optimizer, and loss function into the training workflow
+- Implemented forward pass, loss computation, and backpropagation steps
+- Added optimizer updates for model parameter learning
+- Implemented validation loop for performance monitoring
+- Added device management for CPU/GPU compatibility
+- Implemented training and validation loss tracking across epochs
+
+### Outcome
+Successfully implemented the core training loop responsible for model learning. The trainer module now orchestrates forward passes, loss computation, gradient updates, and validation evaluation, enabling the CNN model to learn discriminative patterns from MRI slices.
