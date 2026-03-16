@@ -58,7 +58,9 @@ class MRIClassifierCNN(nn.Module):
         x = self.conv3(x)
         x = self.conv4(x)
 
-        x.register_hook(self._save_gradient)
+        if x.requires_grad:
+            x.register_hook(self._save_gradient)
+
         self.conv_output = x
 
         x = self.adaptive_pool(x)

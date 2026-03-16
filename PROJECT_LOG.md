@@ -208,3 +208,19 @@ Successfully implemented the core training loop responsible for model learning. 
 
 ### Outcome
 Successfully implemented the complete training execution script serving as the central entry point for the training pipeline. The script orchestrates all training components from data loading through model checkpoint saving, providing a production-ready interface for training the MRI classification system with configurable hyperparameters via command-line arguments.
+
+### Step 9 – Model Evaluation Pipeline (In Progress)
+
+## Step 9.1 – Prediction Collection (Completed)
+
+### Actions
+- Implemented prediction collection module in `src/evaluation/predictor.py`
+- Added functionality to load trained model checkpoints
+- Implemented inference pipeline using PyTorch evaluation mode
+- Disabled gradient computation during prediction using `torch.no_grad()`
+- Collected true labels, predicted labels, and prediction probabilities
+- Structured prediction outputs for downstream evaluation metrics
+- Updated CNN model (`src/models/cnn_model.py`) to conditionally register gradient hooks only when gradients are enabled to ensure compatibility with inference mode
+
+### Outcome
+Successfully implemented the prediction collection module for the evaluation pipeline. The system can now run inference on validation datasets and collect prediction outputs required for performance metric computation while maintaining compatibility with Grad-CAM functionality during training.
