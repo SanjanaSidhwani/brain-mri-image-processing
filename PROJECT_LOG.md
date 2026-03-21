@@ -264,3 +264,21 @@ Successfully implemented a structured evaluation reporting system. The model’s
 
 ### Outcome
 Dataset successfully constructed and stored for efficient reuse during training.
+
+### Step 10.2 – Model Training Execution (Completed)
+
+### Actions
+- Executed training pipeline using src/training/train_model.py
+- Loaded serialized dataset records (~70k slices)
+- Performed patient-level train/validation split
+- Initialized MRISliceDataset for training and validation
+- Created DataLoader instances for batch processing
+- Initialized CNN model using model factory
+- Moved model to GPU (RTX 4050)
+- Initialized optimizer (Adam) and loss function (CrossEntropyLoss)
+- Ran full training for multiple epochs
+- Monitored training and validation performance
+- Saved trained model checkpoint
+
+### Outcome
+Training pipeline successfully executed on the full dataset using GPU acceleration. The model achieved high accuracy on both training and validation sets, and a trained model checkpoint was generated for evaluation and future use.
