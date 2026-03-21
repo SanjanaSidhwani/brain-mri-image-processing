@@ -5,6 +5,7 @@ import argparse
 from datetime import datetime
 import random
 import pickle
+import gzip
 
 import numpy as np
 import torch
@@ -46,7 +47,7 @@ def parse_arguments():
     parser.add_argument(
         "--dataset_path",
         type=str,
-        default="data/dataset_records.pkl",
+        default="data/dataset_records.pkl.gz",
         help="Path to serialized dataset records"
     )
 
@@ -96,8 +97,12 @@ def load_dataset_records(dataset_path: str):
             "You must generate dataset_records.pkl using the dataset pipeline."
         )
 
-    with open(dataset_path, "rb") as f:
-        dataset_records = pickle.load(f)
+    if str(dataset_path).endswith(".gz"):
+        with gzip.open(dataset_path, "rb") as f:
+            dataset_records = pickle.load(f)
+    else:
+        with open(dataset_path, "rb") as f:
+            dataset_records = pickle.load(f)
 
     if not isinstance(dataset_records, list):
         raise ValueError("Dataset file must contain a list of dataset records")
