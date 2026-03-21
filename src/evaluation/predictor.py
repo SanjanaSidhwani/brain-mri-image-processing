@@ -1,3 +1,5 @@
+import os
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -45,12 +47,17 @@ class Predictor:
                 outputs = self.model(images)
 
                 probs = F.softmax(outputs, dim=1)
-
                 preds = torch.argmax(probs, dim=1)
 
                 true_labels.extend(labels.cpu().numpy().tolist())
                 predicted_labels.extend(preds.cpu().numpy().tolist())
                 probabilities.extend(probs.cpu().numpy().tolist())
+
+        os.makedirs("outputs", exist_ok=True)
+
+        np.save("outputs/preds.npy", np.array(predicted_labels))
+        np.save("outputs/labels.npy", np.array(true_labels))
+        np.save("outputs/probs.npy", np.array(probabilities))
 
         return {
             "true_labels": true_labels,

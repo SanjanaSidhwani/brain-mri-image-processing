@@ -282,3 +282,39 @@ Dataset successfully constructed and stored for efficient reuse during training.
 
 ### Outcome
 Training pipeline successfully executed on the full dataset using GPU acceleration. The model achieved high accuracy on both training and validation sets, and a trained model checkpoint was generated for evaluation and future use.
+
+## Step 11 – Model Evaluation Deep Dive & Validation (In Progress)
+
+---
+
+## Step 11.1 – Initial Evaluation & Error Observation (Completed)
+
+### Actions
+- Implemented evaluation execution script at src/evaluation/run_evaluation.py
+- Integrated Predictor for model inference on validation dataset
+- Loaded trained model checkpoint from outputs/checkpoints/
+- Performed inference on validation dataset using DataLoader
+- Collected predicted labels, true labels, and probabilities
+- Computed classification metrics using compute_classification_metrics
+- Generated evaluation report with accuracy, precision, recall, F1-score, and confusion matrix
+- Saved prediction outputs (preds.npy, labels.npy, probs.npy) for further analysis
+
+- Files Modified / Added
+  src/evaluation/run_evaluation.py
+  src/evaluation/predictor.py
+  outputs/preds.npy
+  outputs/labels.npy
+  outputs/probs.npy
+
+### Outcome
+Evaluation pipeline successfully executed end-to-end on the validation dataset.  
+
+However, results revealed abnormal model behavior:
+- Accuracy: 0.5833  
+- Precision: 0.5833  
+- Recall: 1.0000  
+- F1 Score: 0.7368  
+
+Confusion matrix showed that the model predicted only a single class (class 1) for all samples, indicating a critical issue in model behavior despite previously observed high training accuracy.  
+
+This suggests potential problems such as class imbalance, data leakage during training, or incorrect evaluation setup, requiring further debugging and validation.
