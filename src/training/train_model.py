@@ -229,7 +229,19 @@ def main():
 
     print_model_info(model, device)
 
-    criterion = nn.CrossEntropyLoss()
+    from collections import Counter
+
+    labels = [r["label"] for r in train_records]
+    counts = Counter(labels)
+
+    total = sum(counts.values())
+
+    weight_0 = total / counts[0]
+    weight_1 = total / counts[1]
+
+    class_weights = torch.tensor([weight_0, weight_1], dtype=torch.float32).to(device)
+
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
 
     optimizer = optim.Adam(
         model.parameters(),
