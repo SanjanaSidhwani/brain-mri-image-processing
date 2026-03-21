@@ -248,3 +248,19 @@ The system can now compute quantitative performance metrics from prediction outp
 
 ### Outcome
 Successfully implemented a structured evaluation reporting system. The model’s performance can now be clearly presented through formatted outputs and saved reports, making results suitable for analysis, debugging, and project demonstration.
+
+### Step 10 – Training Execution & System Finalization (Completed)
+
+### Step 10.1 – Full Dataset Generation (Completed)
+
+### Actions
+- Generated dataset records from BRATS and OASIS datasets
+- Implemented dataset scanning for both folder-based and file-based structures
+- Built slice-level dataset (~70k slices)
+- Serialized dataset using gzip for reuse
+- Files Modified / Added
+  src/utils/build_dataset_records.py
+  data/dataset_records.pkl.gz
+
+### Outcome
+Dataset successfully constructed and stored for efficient reuse during training.
