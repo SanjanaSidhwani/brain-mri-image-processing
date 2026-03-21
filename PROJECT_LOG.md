@@ -209,7 +209,7 @@ Successfully implemented the core training loop responsible for model learning. 
 ### Outcome
 Successfully implemented the complete training execution script serving as the central entry point for the training pipeline. The script orchestrates all training components from data loading through model checkpoint saving, providing a production-ready interface for training the MRI classification system with configurable hyperparameters via command-line arguments.
 
-### Step 9 – Model Evaluation Pipeline (In Progress)
+### Step 9 – Model Evaluation Pipeline (Completed)
 
 ## Step 9.1 – Prediction Collection (Completed)
 
@@ -235,3 +235,16 @@ Successfully implemented the prediction collection module for the evaluation pip
 
 ### Outcome
 The system can now compute quantitative performance metrics from prediction outputs, enabling objective evaluation of the MRI classification model.
+
+## Step 9.3 – Evaluation Report Generation (Completed)
+
+### Actions
+- Implemented evaluation report module in `src/evaluation/report.py`
+- Added formatted console output for evaluation metrics (accuracy, precision, recall, F1-score)
+- Implemented readable confusion matrix display for binary classification
+- Added support for saving evaluation results to JSON format
+- Ensured safe handling of missing metric values using default fallbacks
+- Added validation for confusion matrix shape to prevent runtime errors
+
+### Outcome
+Successfully implemented a structured evaluation reporting system. The model’s performance can now be clearly presented through formatted outputs and saved reports, making results suitable for analysis, debugging, and project demonstration.
