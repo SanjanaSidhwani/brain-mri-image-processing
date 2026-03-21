@@ -12,3 +12,10 @@ error_rate = total_errors / total_samples
 print(f"Total Samples: {total_samples}")
 print(f"Total Errors: {total_errors}")
 print(f"Error Rate: {error_rate:.4f}")
+
+error_indices = np.where(errors)[0]
+
+print("\nSample Misclassifications (up to 10):")
+
+for idx in error_indices[:10]:
+    print(f"Index: {idx} | Pred: {preds[idx]} | Actual: {labels[idx]}")

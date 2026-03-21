@@ -345,3 +345,24 @@ Improved evaluation results:
 - F1 Score: 0.9996  
 
 Confusion matrix confirms balanced predictions with minimal misclassification, indicating reliable model performance.
+
+## Step 11.3 – Failure Case Analysis (Completed)
+
+### Actions
+- Implemented error inspection in src/evaluation/error_analysis.py
+- Identified misclassified samples using prediction vs ground truth comparison
+- Extracted indices of incorrect predictions
+- Printed sample misclassifications including predicted and actual labels
+- Analyzed error patterns in model predictions
+
+- Files Modified / Added
+  src/evaluation/error_analysis.py
+
+### Outcome
+Model errors were minimal, with only a small number of misclassified samples observed.  
+
+Analysis revealed that all errors were false negatives, where the model predicted the normal class (0) for abnormal cases (1).  
+
+This indicates that while overall model accuracy is very high, there is a slight tendency to miss certain tumor cases.  
+
+The insight highlights an important limitation of the model and provides direction for further improvements in sensitivity and reliability.
