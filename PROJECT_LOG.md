@@ -396,7 +396,6 @@ Top-K aggregation improved robustness by compensating for occasional slice-level
 ## Step 12 – ROC-AUC Evaluation
 
 ---
-
 ## Step 12.1 – ROC-AUC Metric Integration (Completed)
 
 ### Actions

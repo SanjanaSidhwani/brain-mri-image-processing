@@ -58,6 +58,10 @@ def main():
     for pid in patient_labels:
         y_true.append(patient_labels[pid])
         y_pred.append(patient_preds[pid])
+    print("\n===== Patient Predictions =====")
+
+    for pid in patient_labels:
+        print(f"Patient: {pid} | True: {patient_labels[pid]} | Pred: {patient_preds[pid]}")
 
     print("\n===== Patient-Level Evaluation =====")
 

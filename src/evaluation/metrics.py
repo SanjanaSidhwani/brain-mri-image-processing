@@ -34,7 +34,6 @@ def compute_classification_metrics(
 
     
     if probabilities is not None:
-        
         class1_probs = [p[1] for p in probabilities]
         roc_auc = roc_auc_score(true_labels, class1_probs)
         metrics["roc_auc"] = roc_auc
