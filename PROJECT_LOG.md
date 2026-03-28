@@ -494,3 +494,24 @@ Grad-CAM quality improved from edge-dominant activations toward more internal, c
 
 ### Outcome
 Successfully implemented production-ready inference wrapper decoupling analysis logic from UI implementation. The module provides a clean, reusable interface for Streamlit integration without tight coupling. Supports both CLI and programmatic usage. Ready for Streamlit application development.
+
+## Step 15 – Streamlit Application Development
+
+---
+
+## Step 15.1 – Initial Version of Streamlit App (Completed)
+
+### Actions
+- Built initial Streamlit app in `app.py` for MRI upload and interactive slice navigation
+- Added NIfTI upload support (`.nii`, `.nii.gz`) with file validation and patient metadata display
+- Integrated cached model loading, slice-level prediction, and confidence display
+- Added optional Grad-CAM with 3-panel output: Original, Heatmap, Overlay
+- Applied stability fixes for volume-to-slice skull stripping, transform tensor input, overlay size alignment, and Streamlit image rendering
+- Added Streamlit dependency to requirements
+
+- Files Modified / Added
+  app.py
+  requirements.txt
+
+### Outcome
+Delivered a stable Streamlit baseline with upload, prediction, and Grad-CAM explainability. Ready for creative UI enhancements in the next iteration.
