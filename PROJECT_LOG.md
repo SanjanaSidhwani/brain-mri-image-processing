@@ -671,3 +671,29 @@ Model reliability work is now correctly tracked under a dedicated training/evalu
 
 ### Outcome
 Patient-level decision behavior is now consistent across app, inference, and evaluation. OASIS false-positive behavior has been reduced from the earlier failure mode to a low residual rate (about 1%), while preserving strong tumor detection on validation and known tumor sanity checks.
+
+## Step 17 – Slice Threshold Calibration Integration (Completed)
+
+### Actions
+- Added threshold calibration utility in `src/evaluation/threshold_calibration.py`.
+- Integrated calibration + artifact save in `src/evaluation/run_evaluation.py`.
+- Wired calibrated slice threshold usage into `app.py`.
+
+### Slice Threshold Artifact (Current)
+- file: `outputs/calibration/slice_threshold_calibration.json`
+- objective: balanced accuracy (with minimum-specificity guard)
+
+### Results
+- Slice-level decisions now use a calibrated threshold instead of a fixed 0.50.
+- Evaluation reports include default and calibrated-threshold results.
+- Streamlit uses calibrated threshold when available, with safe fallback.
+
+### Files Modified / Added
+- Added:
+  - `src/evaluation/threshold_calibration.py`
+- Modified:
+  - `src/evaluation/run_evaluation.py`
+  - `app.py`
+
+### Outcome
+Threshold calibration is now part of the standard pipeline and reusable after retraining or dataset updates.

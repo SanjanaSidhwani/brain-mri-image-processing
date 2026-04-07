@@ -51,6 +51,24 @@ def load_aggregation_params(config_path="outputs/calibration/aggregation_calibra
         return defaults
 
 
+@st.cache_data
+def load_slice_threshold(config_path="outputs/calibration/slice_threshold_calibration.json"):
+    default_threshold = 0.5
+    path = Path(config_path)
+    if not path.exists():
+        return default_threshold
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        threshold = float(payload.get("threshold", default_threshold))
+        if 0.0 <= threshold <= 1.0:
+            return threshold
+    except Exception:
+        pass
+    return default_threshold
+
+
 @st.cache_resource
 def load_model(checkpoint_path=None):
     if checkpoint_path is None:
@@ -127,15 +145,15 @@ def predict_slices_batch(model, device, slices, max_slices=None):
     return np.array(predictions)
 
 
-def predict_slice(model, device, slice_tensor):
+def predict_slice(model, device, slice_tensor, slice_threshold=0.5):
     slice_tensor = slice_tensor.unsqueeze(0).to(device)
     
     with torch.no_grad():
         output = model(slice_tensor)
         probs = torch.softmax(output, dim=1)
-        pred = torch.argmax(probs, dim=1).item()
-        confidence = probs[0, pred].item()
         tumor_prob = probs[0, 1].item()
+        pred = 1 if tumor_prob >= float(slice_threshold) else 0
+        confidence = tumor_prob if pred == 1 else (1.0 - tumor_prob)
     
     return pred, confidence, tumor_prob
 
@@ -355,6 +373,7 @@ def main():
         st.markdown("---")
 
         model, device = load_model()
+        slice_threshold = load_slice_threshold()
 
         all_predictions = predict_slices_batch(model, device, slices)
         highest_tumor_idx = np.argmax(all_predictions)
@@ -389,7 +408,12 @@ def main():
         normalized_slice = normalize_slice(selected_slice)
 
         slice_tensor = preprocess_slice_for_model(selected_slice)
-        pred, confidence, tumor_prob = predict_slice(model, device, slice_tensor)
+        pred, confidence, tumor_prob = predict_slice(
+            model,
+            device,
+            slice_tensor,
+            slice_threshold=slice_threshold,
+        )
 
         st.markdown("---")
 
@@ -407,6 +431,8 @@ def main():
             st.metric("Tumor Probability", f"{tumor_prob*100:.2f}%")
         with slice_col5:
             st.metric("Highest Tumor Slice", f"#{highest_tumor_idx}")
+
+        st.caption(f"Slice threshold in use: {slice_threshold:.3f}")
         
         st.markdown("---")
         

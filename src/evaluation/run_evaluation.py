@@ -5,6 +5,7 @@ from src.evaluation.predictor import Predictor
 from src.evaluation.metrics import compute_classification_metrics
 from src.evaluation.report import generate_report
 from src.evaluation.gradcam import GradCAM, save_gradcam_panel
+from src.evaluation.threshold_calibration import calibrate_binary_threshold, save_threshold_calibration
 
 from src.dataset.mri_dataset import MRISliceDataset
 from src.dataset.split_utils import split_dataset_by_patient
@@ -177,6 +178,31 @@ def main():
     )
 
     generate_report(metrics)
+
+    # Calibrate a slice-level threshold using validation outputs.
+    class1_probs = [float(p[1]) for p in outputs["probabilities"]]
+    calibration = calibrate_binary_threshold(
+        true_labels=outputs["true_labels"],
+        positive_class_probs=class1_probs,
+        objective="balanced_accuracy",
+        min_specificity=0.98,
+    )
+    save_threshold_calibration(
+        calibration,
+        "outputs/calibration/slice_threshold_calibration.json",
+    )
+
+    calibrated_preds = [1 if prob >= calibration.threshold else 0 for prob in class1_probs]
+    calibrated_metrics = compute_classification_metrics(
+        outputs["true_labels"],
+        calibrated_preds,
+        outputs["probabilities"],
+    )
+
+    print("\n===== Slice-Level Evaluation (Calibrated Threshold) =====")
+    print(f"Calibrated threshold: {calibration.threshold:.4f}")
+    generate_report(calibrated_metrics)
+
     print("\n===== Grad-CAM Visualization =====")
 
     gradcam = GradCAM(predictor.model)
