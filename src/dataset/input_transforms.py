@@ -88,6 +88,10 @@ def stack_multimodal(
         recs = by_modality.get(modality, [])
         mapping = {r["slice_index"]: r["slice"] for r in recs}
         sl = mapping.get(current_index, zero_slice)
+
+        if sl.shape != (h, w):
+            sl = cv2.resize(sl.astype(np.float32), (w, h), interpolation=cv2.INTER_LINEAR)
+
         if apply_skull_strip:
             sl = strip_skull(sl, margin=20)
         channels.append(sl)

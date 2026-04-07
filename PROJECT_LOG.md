@@ -720,3 +720,53 @@
 - Pipeline now accepts arbitrary MRI modality tokens and automatically labels them during ingestion.
 - Unknown/non-standard sequences no longer get silently dropped from dataset scanning.
 - Canonical modalities remain backward compatible while open-set modalities are preserved for flexible mixed-dataset experimentation.
+
+---
+
+## Step 19 - Modality-Aware Slice Threshold Calibration (Completed)
+
+### Actions
+- Extended slice-threshold calibration from a single global threshold to modality-aware calibration with global fallback.
+- Added calibration utilities to compute per-modality thresholds with minimum sample safeguards and constraint-aware optimization.
+- Added artifact save/load flow for modality-threshold configuration.
+- Integrated per-modality threshold generation into evaluation so calibration artifacts are produced during evaluation runs.
+- Updated inference/runtime threshold selection to use detected modality-specific threshold first, then global fallback.
+- Updated Streamlit threshold path to use modality-aware threshold selection for slice-level decisioning.
+- Added focused tests for modality-threshold payload creation and threshold lookup precedence.
+
+### Files Added/Modified
+- Modified: src/evaluation/threshold_calibration.py
+- Modified: src/evaluation/run_evaluation.py
+- Modified: src/inference.py
+- Modified: app.py
+- Added: tests/test_threshold_calibration_modality.py
+- Added/Modified: outputs/calibration/modality_threshold_calibration.json
+
+### Outcome
+- Thresholding logic is now modality-aware in architecture, with safe fallbacks when modality-specific calibration is unavailable.
+- Inference outputs now expose modality and slice threshold used, improving auditability and debugging.
+- Calibration framework is ready to produce distinct thresholds per modality once dataset records include modality metadata at scale.
+
+---
+
+## Step 20 - IXI External Validation and Multimodal Runtime Hardening (Completed)
+
+### Actions
+- Verified IXI data availability and identified archive-only state in data/raw/IXI.
+- Extracted IXI modality archives (T1/T2/PD/MRA) and validated NIfTI discovery counts.
+- Ran IXI compatibility smoke checks through adapter scan, dataset record build, dataset tensor generation, and one-file inference.
+- Identified multimodal stacking failure caused by per-modality in-plane shape mismatch within a patient.
+- Added shape-alignment logic before multimodal channel stacking to robustly support mixed-shape modality inputs.
+- Re-ran focused transform/dataset/modality tests and IXI end-to-end smoke checks after the fix.
+
+### Files Added/Modified
+- Modified: src/dataset/input_transforms.py
+- Modified: tests/test_input_transforms.py
+- Modified: tests/test_mri_dataset.py
+- Modified: tests/test_modality_pipeline.py
+- Added/Modified: data/raw/IXI/*.nii.gz
+
+### Outcome
+- IXI files are now usable end-to-end by the current pipeline after archive extraction and stacking fix.
+- Multimodal channel construction became resilient to modality-specific slice shape differences.
+- External validation path is now stronger for cross-dataset robustness checks.
