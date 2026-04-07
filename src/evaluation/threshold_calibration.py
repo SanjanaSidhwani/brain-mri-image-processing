@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Dict, Iterable, Optional
 import json
 
 import numpy as np
@@ -138,3 +138,110 @@ def save_threshold_calibration(result: ThresholdCalibrationResult, filepath: str
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
+
+
+def calibrate_thresholds_by_modality(
+    true_labels: Iterable[int],
+    positive_class_probs: Iterable[float],
+    modalities: Iterable[str],
+    objective: str = "balanced_accuracy",
+    min_specificity: Optional[float] = None,
+    min_sensitivity: Optional[float] = None,
+    min_samples_per_modality: int = 20,
+) -> Dict[str, Dict]:
+    y_true = np.asarray(list(true_labels), dtype=np.int64)
+    y_prob = np.asarray(list(positive_class_probs), dtype=np.float32)
+    y_mod = np.asarray([str(m).lower() if m is not None else "unknown" for m in modalities], dtype=object)
+
+    if len(y_true) != len(y_prob) or len(y_true) != len(y_mod):
+        raise ValueError("true_labels, positive_class_probs, and modalities must have equal length")
+
+    global_result = calibrate_binary_threshold(
+        true_labels=y_true,
+        positive_class_probs=y_prob,
+        objective=objective,
+        min_specificity=min_specificity,
+        min_sensitivity=min_sensitivity,
+    )
+
+    per_modality: Dict[str, ThresholdCalibrationResult] = {}
+    sample_counts: Dict[str, int] = {}
+
+    for modality in sorted(np.unique(y_mod)):
+        mask = y_mod == modality
+        count = int(np.sum(mask))
+        sample_counts[modality] = count
+
+        if count < int(min_samples_per_modality):
+            continue
+
+        # Skip pathological single-class modalities for threshold search.
+        if len(np.unique(y_true[mask])) < 2:
+            continue
+
+        per_modality[modality] = calibrate_binary_threshold(
+            true_labels=y_true[mask],
+            positive_class_probs=y_prob[mask],
+            objective=objective,
+            min_specificity=min_specificity,
+            min_sensitivity=min_sensitivity,
+        )
+
+    return {
+        "global": asdict(global_result),
+        "per_modality": {k: asdict(v) for k, v in per_modality.items()},
+        "objective": objective,
+        "min_specificity_constraint": min_specificity,
+        "min_sensitivity_constraint": min_sensitivity,
+        "min_samples_per_modality": int(min_samples_per_modality),
+        "sample_counts": sample_counts,
+    }
+
+
+def save_modality_threshold_calibration(payload: Dict, filepath: str) -> None:
+    out_path = Path(filepath)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+
+def load_threshold_for_modality(
+    modality: Optional[str],
+    modality_config_path: str = "outputs/calibration/modality_threshold_calibration.json",
+    global_config_path: str = "outputs/calibration/slice_threshold_calibration.json",
+    default_threshold: float = 0.5,
+) -> float:
+    modality_key = (modality or "unknown").lower()
+
+    modality_path = Path(modality_config_path)
+    if modality_path.exists():
+        try:
+            with open(modality_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+
+            per_modality = payload.get("per_modality", {})
+            if modality_key in per_modality:
+                thr = float(per_modality[modality_key].get("threshold", default_threshold))
+                if 0.0 <= thr <= 1.0:
+                    return thr
+
+            global_payload = payload.get("global", {})
+            if isinstance(global_payload, dict):
+                thr = float(global_payload.get("threshold", default_threshold))
+                if 0.0 <= thr <= 1.0:
+                    return thr
+        except Exception:
+            pass
+
+    global_path = Path(global_config_path)
+    if global_path.exists():
+        try:
+            with open(global_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            thr = float(payload.get("threshold", default_threshold))
+            if 0.0 <= thr <= 1.0:
+                return thr
+        except Exception:
+            pass
+
+    return default_threshold

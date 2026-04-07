@@ -21,8 +21,10 @@ from src.preprocessing.volume_utils import load_nifti, zscore_normalize, strip_s
 from src.preprocessing.slice_utils import extract_axial_slices
 from src.models.model_factory import create_model
 from src.evaluation.gradcam import GradCAM
+from src.evaluation.threshold_calibration import load_threshold_for_modality
 from src.dataset.input_transforms import build_eval_transform
 from src.aggregation.topk_aggregation import robust_patient_prediction_from_tumor_probs
+from src.preprocessing.modality_detection import detect_modality
 
 
 def infer_input_channels_from_state_dict(state_dict):
@@ -74,6 +76,11 @@ def load_slice_threshold(config_path="outputs/calibration/slice_threshold_calibr
     except Exception:
         pass
     return default_threshold
+
+
+@st.cache_data
+def load_modality_threshold(modality: str):
+    return load_threshold_for_modality(modality)
 
 
 @st.cache_resource
@@ -383,7 +390,8 @@ def main():
         st.markdown("---")
 
         model, device, input_channels = load_model()
-        slice_threshold = load_slice_threshold()
+        modality = detect_modality(uploaded_file.name)
+        slice_threshold = load_modality_threshold(modality)
 
         all_predictions = predict_slices_batch(model, device, slices, input_channels=input_channels)
         highest_tumor_idx = np.argmax(all_predictions)
@@ -442,7 +450,7 @@ def main():
         with slice_col5:
             st.metric("Highest Tumor Slice", f"#{highest_tumor_idx}")
 
-        st.caption(f"Slice threshold in use: {slice_threshold:.3f}")
+        st.caption(f"Slice threshold in use ({modality}): {slice_threshold:.3f}")
         
         st.markdown("---")
         

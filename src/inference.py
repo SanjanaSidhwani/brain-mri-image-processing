@@ -9,6 +9,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.models.model_factory import create_model
+from src.evaluation.threshold_calibration import load_threshold_for_modality
+from src.preprocessing.modality_detection import detect_modality
 from src.preprocessing.volume_utils import load_nifti, zscore_normalize, strip_skull
 from src.preprocessing.slice_utils import extract_axial_slices
 from src.dataset.input_transforms import build_eval_transform
@@ -86,6 +88,8 @@ def predict_on_mri(
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
     
+    modality = detect_modality(str(mri_path))
+
     volume = load_nifti(str(mri_path))
     normalized_volume = zscore_normalize(volume)
     
@@ -125,6 +129,7 @@ def predict_on_mri(
     predictions_all = []
     confidences_all = []
     tumor_probs_all = []
+    slice_threshold = load_threshold_for_modality(modality)
     
     with torch.no_grad():
         for slice_2d in slices:
@@ -143,7 +148,7 @@ def predict_on_mri(
             
             output = model(slice_tensor)
             probs = F.softmax(output, dim=1)
-            pred = torch.argmax(probs, dim=1).item()
+            pred = 1 if probs[0, 1].item() >= float(slice_threshold) else 0
             conf = probs[0, pred].item()
             tumor_prob = probs[0, 1].item()
             
@@ -170,7 +175,9 @@ def predict_on_mri(
         "suspicious_slices": decision["suspicious_slices"],
         "suspicious_fraction": decision["suspicious_fraction"],
         "total_slices": len(predictions_all),
-        "checkpoint_used": str(checkpoint_path)
+        "checkpoint_used": str(checkpoint_path),
+        "modality": modality,
+        "slice_threshold_used": float(slice_threshold),
     }
 
 
@@ -199,5 +206,7 @@ if __name__ == "__main__":
     print(f"Confidence: {result['confidence']:.4f}")
     print(f"Tumor Probability: {result['tumor_probability']:.4f}")
     print(f"Tumor Slices: {result['tumor_slices']} / {result['total_slices']}")
+    print(f"Detected modality: {result['modality']}")
+    print(f"Slice threshold used: {result['slice_threshold_used']:.4f}")
     print(f"Checkpoint: {result['checkpoint_used']}")
     print("=" * 60 + "\n")

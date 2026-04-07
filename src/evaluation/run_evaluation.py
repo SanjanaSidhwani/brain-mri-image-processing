@@ -5,7 +5,12 @@ from src.evaluation.predictor import Predictor
 from src.evaluation.metrics import compute_classification_metrics
 from src.evaluation.report import generate_report
 from src.evaluation.gradcam import GradCAM, save_gradcam_panel
-from src.evaluation.threshold_calibration import calibrate_binary_threshold, save_threshold_calibration
+from src.evaluation.threshold_calibration import (
+    calibrate_binary_threshold,
+    calibrate_thresholds_by_modality,
+    save_modality_threshold_calibration,
+    save_threshold_calibration,
+)
 
 from src.dataset.mri_dataset import MRISliceDataset
 from src.dataset.split_utils import split_dataset_by_patient
@@ -202,6 +207,45 @@ def main():
     print("\n===== Slice-Level Evaluation (Calibrated Threshold) =====")
     print(f"Calibrated threshold: {calibration.threshold:.4f}")
     generate_report(calibrated_metrics)
+
+    modalities = [str(r.get("modality", "unknown")).lower() for r in val_records]
+    modality_calibration = calibrate_thresholds_by_modality(
+        true_labels=outputs["true_labels"],
+        positive_class_probs=class1_probs,
+        modalities=modalities,
+        objective="balanced_accuracy",
+        min_specificity=0.98,
+        min_samples_per_modality=20,
+    )
+    save_modality_threshold_calibration(
+        modality_calibration,
+        "outputs/calibration/modality_threshold_calibration.json",
+    )
+
+    per_modality_thresholds = {
+        k: float(v["threshold"]) for k, v in modality_calibration.get("per_modality", {}).items()
+    }
+    global_threshold = float(modality_calibration.get("global", {}).get("threshold", calibration.threshold))
+
+    modality_calibrated_preds = [
+        1 if prob >= per_modality_thresholds.get(mod, global_threshold) else 0
+        for prob, mod in zip(class1_probs, modalities)
+    ]
+    modality_calibrated_metrics = compute_classification_metrics(
+        outputs["true_labels"],
+        modality_calibrated_preds,
+        outputs["probabilities"],
+    )
+
+    print("\n===== Slice-Level Evaluation (Per-Modality Calibrated Thresholds) =====")
+    print(f"Global fallback threshold: {global_threshold:.4f}")
+    if per_modality_thresholds:
+        print("Per-modality thresholds:")
+        for mod, thr in sorted(per_modality_thresholds.items()):
+            print(f"  {mod}: {thr:.4f}")
+    else:
+        print("Per-modality thresholds: none met calibration constraints/sample requirements")
+    generate_report(modality_calibrated_metrics)
 
     print("\n===== Grad-CAM Visualization =====")
 
