@@ -3,49 +3,46 @@ import gzip
 from pathlib import Path
 
 from src.dataset.dataset_builder import build_dataset_from_volumes
+from src.dataset.dataset_adapter import BratsAdapter, OasisAdapter, IXIAdapter
 
 
 def get_brats_volumes(brats_root):
-    volumes = []
-
-    for patient in Path(brats_root).iterdir():
-        if patient.is_dir():
-            for file in patient.glob("*flair*.nii*"):
-                volumes.append((str(file), 1, patient.name, "brats"))
-
-    return volumes
+    return BratsAdapter(brats_root).scan()
 
 
 def get_oasis_volumes(oasis_root):
-    volumes = []
+    return OasisAdapter(oasis_root).scan()
 
-    for file in Path(oasis_root).rglob("*.nii*"):
 
-        if "seg" in file.name.lower():
-            continue
-
-        volumes.append((str(file), 0, file.stem, "oasis"))
-
-    return volumes
+def get_ixi_volumes(ixi_root):
+    if not ixi_root:
+        return []
+    root = Path(ixi_root)
+    if not root.exists():
+        return []
+    return IXIAdapter(str(root)).scan()
 
 
 def main():
-
-    brats_root = r"C:\datasets\brats\brats20-dataset-training-validation\BraTS2020_TrainingData\MICCAI_BraTS2020_TrainingData"
-    oasis_root = r"C:\datasets\oasis\OASIS_Clean_Data\OASIS_Clean_Data"
+    project_root = Path(__file__).resolve().parents[2]
+    brats_root = project_root / "data" / "raw" / "brats"
+    oasis_root = project_root / "data" / "raw" / "oasis"
+    ixi_root = project_root / "data" / "raw" / "ixi"
 
     print("Scanning datasets...")
 
-    brats_volumes = get_brats_volumes(brats_root)
-    oasis_volumes = get_oasis_volumes(oasis_root)
+    brats_volumes = get_brats_volumes(str(brats_root))
+    oasis_volumes = get_oasis_volumes(str(oasis_root))
+    ixi_volumes = get_ixi_volumes(str(ixi_root))
 
     print(f"BraTS volumes: {len(brats_volumes)}")
     print(f"OASIS volumes: {len(oasis_volumes)}")
+    print(f"IXI volumes: {len(ixi_volumes)}")
 
     if len(brats_volumes) == 0 or len(oasis_volumes) == 0:
         raise ValueError("Dataset scanning failed. Check dataset paths.")
 
-    all_volumes = brats_volumes + oasis_volumes
+    all_volumes = brats_volumes + oasis_volumes + ixi_volumes
 
     print("Building dataset records... (this will take time)")
 

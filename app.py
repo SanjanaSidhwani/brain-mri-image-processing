@@ -25,6 +25,13 @@ from src.dataset.input_transforms import build_eval_transform
 from src.aggregation.topk_aggregation import robust_patient_prediction_from_tumor_probs
 
 
+def infer_input_channels_from_state_dict(state_dict):
+    for key in ("conv1.0.weight", "module.conv1.0.weight"):
+        if key in state_dict:
+            return int(state_dict[key].shape[1])
+    return 3
+
+
 @st.cache_data
 def load_aggregation_params(config_path="outputs/calibration/aggregation_calibration.json"):
     defaults = {
@@ -79,17 +86,16 @@ def load_model(checkpoint_path=None):
         checkpoint_path = pth_files[-1]
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = create_model(architecture='cnn', num_classes=2)
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    state_dict = checkpoint['model_state_dict'] if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint else checkpoint
+    input_channels = infer_input_channels_from_state_dict(state_dict)
+    model = create_model(architecture='cnn', num_classes=2, input_channels=input_channels)
     
-    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'])
-    else:
-        model.load_state_dict(checkpoint)
+    model.load_state_dict(state_dict)
     
     model = model.to(device)
     model.eval()
-    return model, device
+    return model, device, input_channels
 
 
 def normalize_slice(slice_2d):
@@ -105,17 +111,21 @@ def strip_skull_volume(volume_3d):
     return np.stack([strip_skull(volume_3d[:, :, i]) for i in range(volume_3d.shape[2])], axis=2)
 
 
-def preprocess_slice_for_model(slice_2d, target_size=224, center_crop_size=180):
+def preprocess_slice_for_model(slice_2d, target_size=224, center_crop_size=180, input_channels=3):
     eval_transform = build_eval_transform(
         target_size=target_size,
-        center_crop_size=center_crop_size
+        center_crop_size=center_crop_size,
+        num_channels=input_channels,
     )
 
     if not isinstance(slice_2d, np.ndarray):
         slice_2d = np.asarray(slice_2d)
 
     slice_2d = slice_2d.astype(np.float32, copy=False)
-    stacked = np.stack([slice_2d, slice_2d, slice_2d], axis=0)
+    if input_channels == 1:
+        stacked = np.expand_dims(slice_2d, axis=0)
+    else:
+        stacked = np.repeat(np.expand_dims(slice_2d, axis=0), input_channels, axis=0)
     slice_tensor = torch.from_numpy(stacked).float()
 
     slice_tensor = eval_transform(slice_tensor)
@@ -123,14 +133,14 @@ def preprocess_slice_for_model(slice_2d, target_size=224, center_crop_size=180):
     return slice_tensor
 
 
-def predict_slices_batch(model, device, slices, max_slices=None):
+def predict_slices_batch(model, device, slices, max_slices=None, input_channels=3):
     predictions = []
     
     limit = len(slices) if max_slices is None else min(max_slices, len(slices))
     
     for i in range(limit):
         try:
-            slice_tensor = preprocess_slice_for_model(slices[i])
+            slice_tensor = preprocess_slice_for_model(slices[i], input_channels=input_channels)
             slice_tensor = slice_tensor.unsqueeze(0).to(device)
             
             with torch.no_grad():
@@ -372,10 +382,10 @@ def main():
         
         st.markdown("---")
 
-        model, device = load_model()
+        model, device, input_channels = load_model()
         slice_threshold = load_slice_threshold()
 
-        all_predictions = predict_slices_batch(model, device, slices)
+        all_predictions = predict_slices_batch(model, device, slices, input_channels=input_channels)
         highest_tumor_idx = np.argmax(all_predictions)
         highest_tumor_prob = all_predictions[highest_tumor_idx]
 
@@ -407,7 +417,7 @@ def main():
         selected_slice = slices[slice_index]
         normalized_slice = normalize_slice(selected_slice)
 
-        slice_tensor = preprocess_slice_for_model(selected_slice)
+        slice_tensor = preprocess_slice_for_model(selected_slice, input_channels=input_channels)
         pred, confidence, tumor_prob = predict_slice(
             model,
             device,

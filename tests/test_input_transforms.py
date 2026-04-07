@@ -29,11 +29,12 @@ def _make_patient_records(height: int = 256, width: int = 256):
 
 def test_skull_strip_removes_outer_boundary():
     height, width = 256, 256
-    
+
     outer_val = 50.0
     inner_val = 100.0
-    
-    slice_2d = np.full((height, width), fill_value=outer_val, dtype=np.float32)
+
+    slice_2d = np.zeros((height, width), dtype=np.float32)
+    slice_2d[20:230, 20:230] = outer_val
     slice_2d[50:200, 50:200] = inner_val
     
     stripped = strip_skull(slice_2d, margin=10)

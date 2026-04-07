@@ -1,10 +1,28 @@
 import numpy as np
 import nibabel as nib
 
+from .modality_detection import detect_field_strength_t, detect_modality
+from .resampling import get_voxel_spacing, reorient_to_ras_image, resample_nifti_image
 
-def load_nifti(file_path):
+
+def load_nifti(
+    file_path,
+    to_ras=True,
+    target_spacing=(1.0, 1.0, 1.0),
+    return_metadata=False,
+):
     nifti_img = nib.load(file_path)
-    
+
+    original_spacing = get_voxel_spacing(nifti_img)
+
+    if to_ras:
+        nifti_img = reorient_to_ras_image(nifti_img)
+
+    if target_spacing is not None:
+        nifti_img = resample_nifti_image(nifti_img, target_spacing=target_spacing)
+
+    spacing = get_voxel_spacing(nifti_img)
+
     
     data = nifti_img.get_fdata()
     
@@ -23,8 +41,18 @@ def load_nifti(file_path):
         )
     
     data = data.astype(np.float32)
-    
-    return data
+
+    if not return_metadata:
+        return data
+
+    metadata = {
+        "modality": detect_modality(file_path, nifti_img),
+        "field_strength_t": detect_field_strength_t(file_path, nifti_img),
+        "voxel_spacing": spacing,
+        "original_spacing": original_spacing,
+    }
+
+    return data, metadata
 
 
 def zscore_normalize(volume):

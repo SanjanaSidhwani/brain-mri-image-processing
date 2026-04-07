@@ -5,19 +5,82 @@ from ..preprocessing.slice_utils import (
     extract_axial_slices,
     is_informative_slice
 )
+from ..preprocessing.modality_detection import detect_modality
+from ..preprocessing.scanner_normalization import (
+    apply_optional_histogram_standardization,
+    normalize_by_scanner_strength,
+)
 
 
-def create_slice_record(slice_2d, label, patient_id, slice_index, dataset_name):
+def create_slice_record(
+    slice_2d,
+    label,
+    patient_id,
+    slice_index,
+    dataset_name,
+    modality="unknown",
+    field_strength_t=None,
+    voxel_spacing=None,
+):
     return {
         "slice": slice_2d,
         "label": label,
         "patient_id": patient_id,
         "slice_index": slice_index,  
         "dataset": dataset_name,
+        "modality": modality,
+        "modalities": [modality],
+        "field_strength_t": field_strength_t,
+        "voxel_spacing": voxel_spacing,
     }
 
 
-def build_volume_dataset(volume, label, patient_id, dataset_name, threshold=0.05):
+def _normalize_volume_entry(volume_item):
+    if hasattr(volume_item, "volume_path"):
+        return {
+            "volume_path": volume_item.volume_path,
+            "label": volume_item.label,
+            "patient_id": volume_item.patient_id,
+            "dataset_name": volume_item.dataset_name,
+            "modality": getattr(volume_item, "modality", "unknown"),
+            "field_strength_t": getattr(volume_item, "field_strength_t", None),
+        }
+
+    if isinstance(volume_item, dict):
+        required = ("volume_path", "label", "patient_id", "dataset_name")
+        if any(k not in volume_item for k in required):
+            raise ValueError(f"Volume dict is missing required keys: {required}")
+        out = dict(volume_item)
+        out.setdefault("modality", "unknown")
+        out.setdefault("field_strength_t", None)
+        return out
+
+    if isinstance(volume_item, tuple) or isinstance(volume_item, list):
+        if len(volume_item) < 4:
+            raise ValueError("Expected tuple/list volume entry with at least 4 items")
+        out = {
+            "volume_path": volume_item[0],
+            "label": volume_item[1],
+            "patient_id": volume_item[2],
+            "dataset_name": volume_item[3],
+            "modality": volume_item[4] if len(volume_item) > 4 else "unknown",
+            "field_strength_t": volume_item[5] if len(volume_item) > 5 else None,
+        }
+        return out
+
+    raise TypeError(f"Unsupported volume entry type: {type(volume_item)}")
+
+
+def build_volume_dataset(
+    volume,
+    label,
+    patient_id,
+    dataset_name,
+    threshold=0.05,
+    modality="unknown",
+    field_strength_t=None,
+    voxel_spacing=None,
+):
     
     if volume.ndim != 3:
         raise ValueError(
@@ -37,7 +100,10 @@ def build_volume_dataset(volume, label, patient_id, dataset_name, threshold=0.05
                 label=label,
                 patient_id=patient_id,
                 slice_index=original_index, 
-                dataset_name=dataset_name
+                dataset_name=dataset_name,
+                modality=modality,
+                field_strength_t=field_strength_t,
+                voxel_spacing=voxel_spacing,
             )
             
             slice_records.append(record)
@@ -45,21 +111,50 @@ def build_volume_dataset(volume, label, patient_id, dataset_name, threshold=0.05
     return slice_records
 
 
-def build_dataset_from_volumes(list_of_volumes, threshold=0.05):
+def build_dataset_from_volumes(
+    list_of_volumes,
+    threshold=0.05,
+    target_spacing=(1.0, 1.0, 1.0),
+    use_histogram_standardization=False,
+    histogram_landmarks=None,
+):
     
     master_dataset = []
     
-    for volume_path, label, patient_id, dataset_name in list_of_volumes:
-        
-        volume = load_nifti(volume_path)
+    for volume_item in list_of_volumes:
+        entry = _normalize_volume_entry(volume_item)
+
+        volume, meta = load_nifti(
+            entry["volume_path"],
+            to_ras=True,
+            target_spacing=target_spacing,
+            return_metadata=True,
+        )
+
+        modality = entry.get("modality") or meta.get("modality") or detect_modality(entry["volume_path"])
+        field_strength_t = entry.get("field_strength_t")
+        if field_strength_t is None:
+            field_strength_t = meta.get("field_strength_t")
+
+        volume = normalize_by_scanner_strength(volume, field_strength_t)
+        if use_histogram_standardization:
+            volume = apply_optional_histogram_standardization(
+                volume=volume,
+                modality=modality,
+                landmark_map=histogram_landmarks,
+            )
+
         normalized_volume = zscore_normalize(volume)
         
         slice_records = build_volume_dataset(
             volume=normalized_volume,
-            label=label,
-            patient_id=patient_id,
-            dataset_name=dataset_name,
-            threshold=threshold
+            label=entry["label"],
+            patient_id=entry["patient_id"],
+            dataset_name=entry["dataset_name"],
+            threshold=threshold,
+            modality=modality,
+            field_strength_t=field_strength_t,
+            voxel_spacing=meta.get("voxel_spacing"),
         )
         
         master_dataset.extend(slice_records)

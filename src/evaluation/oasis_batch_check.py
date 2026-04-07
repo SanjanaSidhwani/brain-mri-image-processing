@@ -26,11 +26,13 @@ def collect_oasis_files(root: Path):
 
 
 def main():
+    default_oasis_root = str(Path(__file__).resolve().parents[2] / "data" / "raw" / "oasis")
+
     parser = argparse.ArgumentParser(description="Batch OASIS false-positive check")
     parser.add_argument(
         "--oasis_root",
         type=str,
-        default=r"C:\datasets\oasis\OASIS_Clean_Data\OASIS_Clean_Data",
+        default=default_oasis_root,
     )
     parser.add_argument("--checkpoint", type=str, default=None)
     parser.add_argument("--max_cases", type=int, default=0)

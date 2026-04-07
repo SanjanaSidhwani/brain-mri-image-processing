@@ -614,3 +614,109 @@
 ### Outcome
 - Slice-level decision threshold is now data-calibrated.
 - Threshold behavior remains reusable and consistent after retraining/data updates.
+
+---
+
+## Step 18 - Multimodality Generalization and Data-Root Migration (Completed)
+
+## Step 18.1 - Modality/Scanner/Geometry-Aware Pipeline Upgrade (Completed)
+
+### Actions
+- Added automatic modality detection from filename/header context for FLAIR, T1, T1c, T2, and PD.
+- Added scanner-aware intensity normalization utilities with robust scaling and optional histogram standardization hooks.
+- Added orientation normalization to canonical RAS and voxel-spacing resampling to a common grid.
+- Extended dataset record construction to store modality, field strength, and voxel spacing metadata.
+- Added dataset adapters to standardize data ingestion contracts across BraTS, OASIS, and IXI.
+- Expanded input construction from fixed 2.5D to configurable single-channel, legacy 2.5D, and multimodal channel stacking.
+- Added modality dropout support for multimodal training robustness.
+- Updated model factory and CNN definition to support variable input channel counts.
+
+### Files Added/Modified
+- Added: src/preprocessing/modality_detection.py
+- Added: src/preprocessing/scanner_normalization.py
+- Added: src/preprocessing/resampling.py
+- Added: src/dataset/dataset_adapter.py
+- Modified: src/preprocessing/volume_utils.py
+- Modified: src/dataset/dataset_builder.py
+- Modified: src/dataset/input_transforms.py
+- Modified: src/dataset/mri_dataset.py
+- Modified: src/models/cnn_model.py
+- Modified: src/models/model_factory.py
+- Modified: src/training/train_model.py
+- Modified: src/inference.py
+- Modified: app.py
+
+### Outcome
+- Core pipeline became modality-flexible and scanner-aware without removing legacy behavior.
+- Training/inference paths now accept variable channel configurations while remaining backward compatible with existing checkpoints and workflows.
+
+---
+
+## Step 18.2 - Dataset Root Migration and Script Hardening (Completed)
+
+### Actions
+- Replaced machine-specific absolute dataset paths with project-relative paths under data/raw.
+- Updated dataset record build flow to scan data/raw/brats, data/raw/oasis, and optional data/raw/ixi.
+- Updated inspection and OASIS diagnostic scripts to discover files dynamically from project data roots.
+- Updated legacy utility tests to use robust file discovery instead of hardcoded local paths.
+
+### Files Added/Modified
+- Modified: src/utils/build_dataset_records.py
+- Modified: inspect_volume.py
+- Modified: test_oasis_sample.py
+- Modified: src/evaluation/oasis_batch_check.py
+- Modified: tests/test_volume_utils.py
+- Modified: tests/test_split_utils.py
+- Modified: tests/test_slice_utils.py
+- Modified: tests/test_dataset_builder.py
+
+### Outcome
+- Project portability improved across machines and environments.
+- Dataset tooling now works after moving raw datasets into the repository-managed directory layout.
+
+---
+
+## Step 18.3 - Validation, Regression Fixes, and BraTS2020 All-Modality Smoke Test (Completed)
+
+### Actions
+- Added new modality pipeline tests and extended existing model/dataset tests for variable-channel behavior.
+- Fixed dataset tensor channel-order regression for single-channel and multimodal conversions.
+- Updated transform/skull-strip tests to match realistic foreground/background assumptions.
+- Ran targeted regression suite and resolved failures until all tests passed.
+- Executed BraTS2020 modality coverage + preprocessing + multimodal loader smoke test on data/raw/brats.
+
+### Files Added/Modified
+- Added: tests/test_modality_pipeline.py
+- Modified: tests/test_model_definition.py
+- Modified: tests/test_mri_dataset.py
+- Modified: tests/test_input_transforms.py
+- Modified: src/dataset/mri_dataset.py
+
+### Outcome
+- Targeted regression suite passed with full success (19/19).
+- BraTS2020 smoke validation confirmed modality availability and multimodal channel construction:
+- FLAIR/T1/T1c/T2 were each detected for all discovered patients.
+- Multimodal sample tensors were generated correctly with 4-channel input shape.
+
+---
+
+## Step 18.4 - Open-Set Modality Acceptance and Automatic Detection Expansion (Completed)
+
+### Actions
+- Expanded modality detection from fixed-label mapping to open-set inference so non-canonical MRI modalities are automatically tagged instead of defaulting to unknown.
+- Added custom modality token support for common advanced sequences (for example ADC, SWI, DWI/DTI, ASL, TOF) while retaining canonical mapping for FLAIR/T1/T1c/T2/PD.
+- Updated detection priority so true modality tokens are selected ahead of generic filename tokens.
+- Removed modality-drop filtering in dataset adapter flow so non-canonical modalities are still ingested and tracked.
+- Updated dataset record construction to always preserve detected modality token in metadata for downstream training and auditability.
+- Added focused tests and runtime checks to confirm custom modality inference and record preservation behavior.
+
+### Files Added/Modified
+- Modified: src/preprocessing/modality_detection.py
+- Modified: src/dataset/dataset_adapter.py
+- Modified: src/dataset/dataset_builder.py
+- Modified: tests/test_modality_pipeline.py
+
+### Outcome
+- Pipeline now accepts arbitrary MRI modality tokens and automatically labels them during ingestion.
+- Unknown/non-standard sequences no longer get silently dropped from dataset scanning.
+- Canonical modalities remain backward compatible while open-set modalities are preserved for flexible mixed-dataset experimentation.

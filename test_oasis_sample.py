@@ -14,6 +14,19 @@ from src.aggregation.topk_aggregation import robust_patient_prediction_from_tumo
 from src.inference import load_aggregation_params
 
 
+def find_oasis_sample() -> str:
+    root = PROJECT_ROOT / "data" / "raw" / "oasis"
+    if not root.exists():
+        raise FileNotFoundError(f"OASIS root not found: {root}")
+
+    for pattern in ("*.nii.gz", "*.nii"):
+        matches = sorted(root.rglob(pattern))
+        if matches:
+            return str(matches[0])
+
+    raise FileNotFoundError(f"No OASIS NIfTI file found under {root}")
+
+
 def load_model(checkpoint_path=None):
     if checkpoint_path is None:
         checkpoint_dir = Path("outputs/checkpoints")
@@ -82,7 +95,7 @@ def main():
     print("OASIS Sample Evaluation")
     print("=" * 60)
     
-    oasis_path = r"C:\datasets\oasis\OASIS_Clean_Data\OASIS_Clean_Data\OAS1_0028_MR1_mpr_n4_anon_111_t88_masked_gfc.nii"
+    oasis_path = find_oasis_sample()
     print(f"\nLoading OASIS volume: {oasis_path}")
     
     try:

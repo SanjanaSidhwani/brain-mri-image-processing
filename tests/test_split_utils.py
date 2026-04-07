@@ -1,12 +1,25 @@
 import numpy as np
+from pathlib import Path
 
 from src.dataset.dataset_builder import build_dataset_from_volumes
 from src.dataset.split_utils import split_dataset_by_patient
 
 
-BRATS_PATH = r"C:\datasets\brats\brats20-dataset-training-validation\BraTS2020_TrainingData\MICCAI_BraTS2020_TrainingData\BraTS20_Training_001\BraTS20_Training_001_flair.nii"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_RAW = PROJECT_ROOT / "data" / "raw"
 
-OASIS_PATH = r"C:\datasets\oasis\OASIS_Clean_Data\OASIS_Clean_Data\OAS1_0028_MR1_mpr_n4_anon_111_t88_masked_gfc.nii"
+
+def _find_first(patterns):
+    for pattern in patterns:
+        hits = sorted(DATA_RAW.rglob(pattern))
+        if hits:
+            return str(hits[0])
+    raise FileNotFoundError(f"No file found in {DATA_RAW} for patterns {patterns}")
+
+
+BRATS_PATH = _find_first(["*flair*.nii", "*flair*.nii.gz", "*.nii", "*.nii.gz"])
+
+OASIS_PATH = _find_first(["*oasis*.nii", "*oasis*.nii.gz", "*.nii", "*.nii.gz"])
 
 
 def test_patient_split():

@@ -12,13 +12,46 @@ class MRISliceDataset(Dataset):
         self,
         dataset_records: List[Dict],
         target_size: int = 224,
-        transform: Optional[callable] = None
+        transform: Optional[callable] = None,
+        channel_mode: str = "auto",
+        modality_order: Optional[List[str]] = None,
+        modality_dropout: float = 0.0,
     ):
         self.dataset_records = dataset_records
         self.target_size = target_size
         self.transform = transform
+        self.channel_mode = channel_mode
+        self.modality_order = modality_order
+        self.modality_dropout = modality_dropout
 
         self.patient_index = build_patient_index(dataset_records)
+        self.modalities = sorted({r.get("modality") for r in dataset_records if r.get("modality")})
+        self.resolved_channel_mode = self._resolve_channel_mode(channel_mode)
+        self.input_channels = self._resolve_input_channels()
+
+    def _resolve_channel_mode(self, channel_mode: str) -> str:
+        mode = channel_mode.lower()
+        if mode != "auto":
+            return mode
+
+        if not self.modalities:
+            return "2.5d"
+
+        if len(self.modalities) == 1:
+            return "single"
+
+        return "multimodal"
+
+    def _resolve_input_channels(self) -> int:
+        if self.resolved_channel_mode == "single":
+            return 1
+
+        if self.resolved_channel_mode == "multimodal":
+            if self.modality_order:
+                return len(self.modality_order)
+            return max(1, len(self.modalities))
+
+        return 3
 
     def __len__(self) -> int:
         return len(self.dataset_records)
@@ -32,6 +65,9 @@ class MRISliceDataset(Dataset):
             target_size=self.target_size,
             pre_resize=(self.transform is None),
             apply_skull_strip=True,
+            channel_mode=self.resolved_channel_mode,
+            modality_order=self.modality_order,
+            modality_dropout_p=self.modality_dropout,
         )
 
         image = self._to_tensor(image)
@@ -44,7 +80,11 @@ class MRISliceDataset(Dataset):
         return image, label
 
     def _to_tensor(self, image: np.ndarray) -> torch.Tensor:
-        if image.ndim == 3 and image.shape[-1] == 3:
+        if image.ndim == 2:
+            image = np.expand_dims(image, axis=0)
+
+        # Convert HWC -> CHW only when array clearly looks channel-last.
+        if image.ndim == 3 and image.shape[0] > 16 and image.shape[-1] <= 16:
             image = np.transpose(image, (2, 0, 1))
 
         tensor = torch.from_numpy(image).float()

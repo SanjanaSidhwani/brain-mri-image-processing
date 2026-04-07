@@ -56,6 +56,19 @@ def test_dataloader_batch():
     assert labels.shape == (4,)
 
 
+def test_dataset_auto_mode_single_channel_with_modality_records():
+    records = generate_dummy_records(6)
+    for r in records:
+        r["modality"] = "flair"
+
+    dataset = MRISliceDataset(records, channel_mode="auto")
+    image, _ = dataset[0]
+
+    assert dataset.resolved_channel_mode == "single"
+    assert dataset.input_channels == 1
+    assert image.shape == (1, 224, 224)
+
+
 if __name__ == "__main__":
     test_dataset_creation()
     test_dataset_sample_format()

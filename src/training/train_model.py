@@ -45,6 +45,19 @@ def parse_arguments():
                         help="Use balanced validation set (50%% tumor, 50%% normal)")
     parser.add_argument("--target_size", type=int, default=224)
     parser.add_argument("--center_crop_size", type=int, default=180)
+    parser.add_argument(
+        "--channel_mode",
+        type=str,
+        default="auto",
+        choices=["auto", "single", "2.5d", "multimodal"],
+        help="Input channel construction mode"
+    )
+    parser.add_argument(
+        "--modality_dropout",
+        type=float,
+        default=0.0,
+        help="Probability of dropping each modality channel during training in multimodal mode"
+    )
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--random_seed", type=int, default=42)
 
@@ -210,27 +223,38 @@ def main():
 
     print("\n[Step 3/7] Creating datasets...")
 
-    train_transform = build_train_transform(
-        target_size=args.target_size,
-        center_crop_size=args.center_crop_size,
-    )
-
-    val_transform = build_eval_transform(
-        target_size=args.target_size,
-        center_crop_size=args.center_crop_size,
-    )
-
     train_dataset = MRISliceDataset(
         dataset_records=train_records,
         target_size=args.target_size,
-        transform=train_transform,
+        transform=None,
+        channel_mode=args.channel_mode,
+        modality_dropout=args.modality_dropout,
     )
 
     val_dataset = MRISliceDataset(
         dataset_records=val_records,
         target_size=args.target_size,
-        transform=val_transform,
+        transform=None,
+        channel_mode=args.channel_mode,
+        modality_dropout=0.0,
     )
+
+    input_channels = train_dataset.input_channels
+
+    train_transform = build_train_transform(
+        target_size=args.target_size,
+        center_crop_size=args.center_crop_size,
+        num_channels=input_channels,
+    )
+
+    val_transform = build_eval_transform(
+        target_size=args.target_size,
+        center_crop_size=args.center_crop_size,
+        num_channels=input_channels,
+    )
+
+    train_dataset.transform = train_transform
+    val_dataset.transform = val_transform
 
     print_dataset_info(train_dataset, val_dataset)
 
@@ -249,7 +273,8 @@ def main():
     model = create_model(
         architecture=args.architecture,
         num_classes=args.num_classes,
-        dropout_rate=args.dropout_rate
+        dropout_rate=args.dropout_rate,
+        input_channels=input_channels,
     )
 
     print_model_info(model, device)

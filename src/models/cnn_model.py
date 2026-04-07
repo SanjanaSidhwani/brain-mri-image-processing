@@ -5,16 +5,17 @@ from typing import Optional
 
 class MRIClassifierCNN(nn.Module):
 
-    def __init__(self, num_classes: int = 2, dropout_rate: float = 0.5):
+    def __init__(self, num_classes: int = 2, dropout_rate: float = 0.5, input_channels: int = 3):
         super(MRIClassifierCNN, self).__init__()
 
         self.num_classes = num_classes
         self.dropout_rate = dropout_rate
+        self.input_channels = input_channels
 
         self.conv_output = None
         self.gradients = None
 
-        self.conv1 = self._make_conv_block(3, 32)
+        self.conv1 = self._make_conv_block(input_channels, 32)
         self.conv2 = self._make_conv_block(32, 64)
         self.conv3 = self._make_conv_block(64, 128)
         self.conv4 = self._make_conv_block(128, 256)

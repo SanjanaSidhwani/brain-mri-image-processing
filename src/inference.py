@@ -15,6 +15,14 @@ from src.dataset.input_transforms import build_eval_transform
 from src.aggregation.topk_aggregation import robust_patient_prediction_from_tumor_probs
 
 
+def _infer_input_channels_from_state_dict(state_dict) -> int:
+    keys = ["conv1.0.weight", "module.conv1.0.weight"]
+    for key in keys:
+        if key in state_dict:
+            return int(state_dict[key].shape[1])
+    return 3
+
+
 def get_latest_checkpoint(checkpoint_dir: str = "outputs/checkpoints") -> str:
     checkpoint_dir = Path(checkpoint_dir)
     if not checkpoint_dir.exists():
@@ -89,23 +97,27 @@ def predict_on_mri(
     
     slices = extract_axial_slices(normalized_volume)
     
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    state_dict = checkpoint["model_state_dict"] if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint else checkpoint
+    input_channels = _infer_input_channels_from_state_dict(state_dict)
+
     eval_transform = build_eval_transform(
         target_size=target_size,
-        center_crop_size=center_crop_size
+        center_crop_size=center_crop_size,
+        num_channels=input_channels,
     )
 
     def _preprocess_slice(slice_2d):
         slice_2d = np.asarray(slice_2d, dtype=np.float32)
-        stacked = np.stack([slice_2d, slice_2d, slice_2d], axis=0)
-        tensor = torch.from_numpy(stacked).float()
+        if input_channels == 1:
+            stacked = np.expand_dims(slice_2d, axis=0)
+        else:
+            stacked = np.repeat(np.expand_dims(slice_2d, axis=0), input_channels, axis=0)
+        tensor = torch.from_numpy(stacked.astype(np.float32)).float()
         return eval_transform(tensor)
-    
-    model = create_model(architecture='cnn', num_classes=2)
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'])
-    else:
-        model.load_state_dict(checkpoint)
+
+    model = create_model(architecture='cnn', num_classes=2, input_channels=input_channels)
+    model.load_state_dict(state_dict)
     
     model = model.to(device)
     model.eval()
@@ -121,12 +133,11 @@ def predict_on_mri(
             if slice_tensor.ndim == 2:
                 slice_tensor = slice_tensor.unsqueeze(0)
             
-            if slice_tensor.dim() == 3:
-                if slice_tensor.shape[0] != 3:
-                    if slice_tensor.shape[2] == 3:
-                        slice_tensor = slice_tensor.permute(2, 0, 1)
-                    else:
-                        slice_tensor = slice_tensor.repeat(3, 1, 1)
+            if slice_tensor.dim() == 3 and slice_tensor.shape[0] != input_channels:
+                if slice_tensor.shape[-1] == input_channels:
+                    slice_tensor = slice_tensor.permute(2, 0, 1)
+                else:
+                    slice_tensor = slice_tensor[:1].repeat(input_channels, 1, 1)
             
             slice_tensor = slice_tensor.unsqueeze(0).to(device)
             

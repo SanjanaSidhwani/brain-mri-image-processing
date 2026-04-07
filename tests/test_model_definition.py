@@ -40,6 +40,13 @@ def test_gradients_hook():
     assert grads is not None
 
 
+def test_single_channel_model_forward_pass():
+    model = create_model("cnn", num_classes=2, input_channels=1)
+    dummy_input = torch.randn(2, 1, 224, 224)
+    output = model(dummy_input)
+    assert output.shape == (2, 2)
+
+
 if __name__ == "__main__":
     test_model_creation()
     test_forward_pass()
