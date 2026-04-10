@@ -18,7 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.preprocessing.volume_utils import load_nifti, zscore_normalize, strip_skull
-from src.preprocessing.slice_utils import extract_axial_slices
+from src.preprocessing.slice_utils import extract_axial_slices, filter_empty_slices
 from src.models.model_factory import create_model
 from src.evaluation.gradcam import GradCAM
 from src.evaluation.threshold_calibration import load_threshold_for_modality
@@ -34,21 +34,39 @@ def infer_input_channels_from_state_dict(state_dict):
     return 3
 
 
+EVAL_ALIGNED_AGGREGATION_PARAMS = {
+    "threshold": 0.70,
+    "top_k": 20,
+    "method": "median",
+    "min_suspicious_slices": 8,
+    "suspicious_prob_threshold": 0.90,
+    "min_suspicious_fraction": 0.30,
+    "healthy_override_topk_max": 0.20,
+    "healthy_override_max_suspicious_slices": 3,
+    "healthy_override_max_suspicious_fraction": 0.05,
+    "hard_tumor_topk_min": 0.95,
+    "hard_tumor_min_suspicious_slices": 3,
+}
+
+
+def get_latest_checkpoint_path(checkpoint_dir="outputs/checkpoints"):
+    checkpoint_dir = Path(checkpoint_dir)
+    if not checkpoint_dir.exists():
+        raise FileNotFoundError(f"No checkpoints found in {checkpoint_dir}")
+
+    pth_files = list(checkpoint_dir.glob("*.pth"))
+    if not pth_files:
+        raise FileNotFoundError(f"No checkpoints found in {checkpoint_dir}")
+
+    return max(pth_files, key=lambda path: path.stat().st_mtime)
+
+
 @st.cache_data
-def load_aggregation_params(config_path="outputs/calibration/aggregation_calibration.json"):
-    defaults = {
-        "threshold": 0.70,
-        "top_k": 20,
-        "method": "median",
-        "min_suspicious_slices": 8,
-        "suspicious_prob_threshold": 0.90,
-        "min_suspicious_fraction": 0.30,
-        "healthy_override_topk_max": 0.20,
-        "healthy_override_max_suspicious_slices": 3,
-        "healthy_override_max_suspicious_fraction": 0.05,
-        "hard_tumor_topk_min": 0.95,
-        "hard_tumor_min_suspicious_slices": 3,
-    }
+def load_aggregation_params(
+    config_path="outputs/calibration/aggregation_calibration.json",
+    loaded_checkpoint_path: str | None = None,
+):
+    defaults = EVAL_ALIGNED_AGGREGATION_PARAMS.copy()
 
     path = Path(config_path)
     if not path.exists():
@@ -57,6 +75,13 @@ def load_aggregation_params(config_path="outputs/calibration/aggregation_calibra
     try:
         with open(path, "r", encoding="utf-8") as f:
             payload = json.load(f)
+        artifact_checkpoint = str(payload.get("checkpoint", "")).replace("\\", "/").lower()
+        loaded_checkpoint = str(loaded_checkpoint_path or "").replace("\\", "/").lower()
+
+        # Ignore aggregation artifacts calibrated for a different checkpoint.
+        if artifact_checkpoint and loaded_checkpoint and artifact_checkpoint != loaded_checkpoint:
+            return defaults
+
         params = payload.get("best", {}).get("params", {})
         merged = defaults.copy()
         merged.update({k: params[k] for k in defaults.keys() if k in params})
@@ -91,11 +116,15 @@ def load_modality_threshold(modality: str):
 @st.cache_resource
 def load_model(checkpoint_path=None):
     if checkpoint_path is None:
-        checkpoint_dir = Path("outputs/checkpoints")
-        pth_files = sorted(checkpoint_dir.glob("*.pth"))
-        if not pth_files:
-            raise FileNotFoundError(f"No checkpoints found in {checkpoint_dir}")
-        checkpoint_path = pth_files[-1]
+        preferred_checkpoint = Path("outputs/checkpoints/step2_balanced_2ep")
+        if preferred_checkpoint.exists():
+            checkpoint_path = preferred_checkpoint
+        else:
+            preferred_checkpoint_with_ext = Path("outputs/checkpoints/step2_balanced_2ep.pth")
+            if preferred_checkpoint_with_ext.exists():
+                checkpoint_path = preferred_checkpoint_with_ext
+            else:
+                checkpoint_path = get_latest_checkpoint_path()
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
@@ -107,7 +136,7 @@ def load_model(checkpoint_path=None):
     
     model = model.to(device)
     model.eval()
-    return model, device, input_channels
+    return model, device, input_channels, str(checkpoint_path)
 
 
 def normalize_slice(slice_2d):
@@ -123,7 +152,14 @@ def strip_skull_volume(volume_3d):
     return np.stack([strip_skull(volume_3d[:, :, i]) for i in range(volume_3d.shape[2])], axis=2)
 
 
-def preprocess_slice_for_model(slice_2d, target_size=224, center_crop_size=180, input_channels=3):
+def preprocess_slice_for_model(
+    slice_2d,
+    target_size=224,
+    center_crop_size=180,
+    input_channels=3,
+    prev_slice=None,
+    next_slice=None,
+):
     eval_transform = build_eval_transform(
         target_size=target_size,
         center_crop_size=center_crop_size,
@@ -136,6 +172,19 @@ def preprocess_slice_for_model(slice_2d, target_size=224, center_crop_size=180, 
     slice_2d = slice_2d.astype(np.float32, copy=False)
     if input_channels == 1:
         stacked = np.expand_dims(slice_2d, axis=0)
+    elif input_channels == 3:
+        if prev_slice is None:
+            prev_slice = np.zeros_like(slice_2d, dtype=np.float32)
+        if next_slice is None:
+            next_slice = np.zeros_like(slice_2d, dtype=np.float32)
+        stacked = np.stack(
+            [
+                np.asarray(prev_slice, dtype=np.float32),
+                slice_2d,
+                np.asarray(next_slice, dtype=np.float32),
+            ],
+            axis=0,
+        )
     else:
         stacked = np.repeat(np.expand_dims(slice_2d, axis=0), input_channels, axis=0)
     slice_tensor = torch.from_numpy(stacked).float()
@@ -152,7 +201,14 @@ def predict_slices_batch(model, device, slices, max_slices=None, input_channels=
     
     for i in range(limit):
         try:
-            slice_tensor = preprocess_slice_for_model(slices[i], input_channels=input_channels)
+            prev_slice = slices[i - 1] if i > 0 else np.zeros_like(slices[i], dtype=np.float32)
+            next_slice = slices[i + 1] if i + 1 < limit else np.zeros_like(slices[i], dtype=np.float32)
+            slice_tensor = preprocess_slice_for_model(
+                slices[i],
+                input_channels=input_channels,
+                prev_slice=prev_slice,
+                next_slice=next_slice,
+            )
             slice_tensor = slice_tensor.unsqueeze(0).to(device)
             
             with torch.no_grad():
@@ -217,11 +273,10 @@ def create_heatmap_rgb(cam):
 
 
 def create_blank_heatmap_and_overlay(normalized_slice):
-    h, w = normalized_slice.shape
-    blank_heatmap = np.zeros((h, w, 3), dtype=np.uint8)
     base = np.stack([normalized_slice] * 3, axis=-1)
     base = (base * 255).astype(np.uint8) if base.max() <= 1 else base.astype(np.uint8)
-    return blank_heatmap, base
+    # Keep healthy-case explainability panels visually neutral (no highlighted regions).
+    return base.copy(), base.copy()
 
 
 def create_probability_graph(predictions, theme_mode="dark"):
@@ -386,6 +441,7 @@ def main():
         normalized_volume = strip_skull_volume(normalized_volume)
         
         slices = extract_axial_slices(normalized_volume)
+        slices = filter_empty_slices(slices, threshold=0.05)
         total_slices = len(slices)
 
         if total_slices == 0:
@@ -402,7 +458,7 @@ def main():
         
         st.markdown("---")
 
-        model, device, input_channels = load_model()
+        model, device, input_channels, checkpoint_used = load_model()
         modality = detect_modality(uploaded_file.name)
         slice_threshold = load_modality_threshold(modality)
 
@@ -411,9 +467,10 @@ def main():
         highest_tumor_prob = all_predictions[highest_tumor_idx]
 
         st.subheader("Patient Diagnosis")
+        agg_params = load_aggregation_params(loaded_checkpoint_path=checkpoint_used)
         decision = robust_patient_prediction_from_tumor_probs(
             tumor_probs=all_predictions,
-            **load_aggregation_params(),
+            **agg_params,
         )
         patient_tumor_prob = decision["score"]
         patient_pred = "Tumor Detected" if decision["prediction"] == 1 else "Normal"
@@ -425,20 +482,36 @@ def main():
         with diag_col2:
             st.metric("Confidence", f"{diagnosis_confidence*100:.2f}%")
 
+        st.caption(f"Checkpoint in use: {Path(checkpoint_used).name}")
+
         st.markdown("---")
 
         st.subheader("Slice Selection")
+        if decision["prediction"] == 1:
+            default_slice_index = int(np.argmax(all_predictions))
+        else:
+            # For healthy predictions, open at the slice with the strongest non-tumor confidence.
+            default_slice_index = int(np.argmin(all_predictions))
+
         slice_index = st.slider(
             "Select Slice",
             min_value=0,
             max_value=total_slices - 1,
-            value=total_slices // 2
+            value=default_slice_index
         )
 
         selected_slice = slices[slice_index]
         normalized_slice = normalize_slice(selected_slice)
 
-        slice_tensor = preprocess_slice_for_model(selected_slice, input_channels=input_channels)
+        selected_prev = slices[slice_index - 1] if slice_index > 0 else np.zeros_like(selected_slice, dtype=np.float32)
+        selected_next = slices[slice_index + 1] if slice_index + 1 < total_slices else np.zeros_like(selected_slice, dtype=np.float32)
+
+        slice_tensor = preprocess_slice_for_model(
+            selected_slice,
+            input_channels=input_channels,
+            prev_slice=selected_prev,
+            next_slice=selected_next,
+        )
         pred, confidence, tumor_prob = predict_slice(
             model,
             device,
