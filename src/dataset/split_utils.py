@@ -128,6 +128,11 @@ def split_dataset_by_patient_balanced_val(
     val_positive = [r for r in val_dataset if r["label"] == 1]
     val_negative = [r for r in val_dataset if r["label"] == 0]
 
+    # Shuffle within class buckets so truncation does not depend on record order.
+    rng = np.random.default_rng(seed)
+    rng.shuffle(val_positive)
+    rng.shuffle(val_negative)
+
     # Calculate how many of each class we need for the target ratio
     target_positive_count = int(len(val_dataset) * val_balance_ratio)
     target_negative_count = len(val_dataset) - target_positive_count

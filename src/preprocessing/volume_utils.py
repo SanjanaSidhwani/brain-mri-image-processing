@@ -24,7 +24,7 @@ def load_nifti(
     spacing = get_voxel_spacing(nifti_img)
 
     
-    data = nifti_img.get_fdata()
+    data = nifti_img.get_fdata(dtype=np.float32)
     
     if data.ndim == 4:
         if data.shape[-1] == 1:
@@ -40,7 +40,7 @@ def load_nifti(
             f"Expected 3D volume after processing, but got shape {data.shape}"
         )
     
-    data = data.astype(np.float32)
+    # Already loaded as float32 above.
 
     if not return_metadata:
         return data
@@ -55,30 +55,45 @@ def load_nifti(
     return data, metadata
 
 
-def zscore_normalize(volume):
-   
-   
+def zscore_normalize(volume, percentile_low=1.0, percentile_high=99.0):
+    """
+    Z-score normalize a volume with intensity clipping.
+    
+    Args:
+        volume: 3D MRI volume
+        percentile_low: lower percentile for clipping (default 1.0)
+        percentile_high: upper percentile for clipping (default 99.0)
+    
+    Returns:
+        Z-score normalized volume with clipped intensities
+    """
     if volume.ndim != 3:
         raise ValueError(
             f"Expected 3D volume, but got shape {volume.shape}"
         )
     
-    
     normalized = volume.copy()
-
     mask = volume != 0
+    
     if not np.any(mask):
         raise ValueError(
             "Volume contains only zero voxels. Cannot normalize."
         )
     
-    mean = np.mean(volume[mask])
-    std = np.std(volume[mask])
+    # Step 1: Clip to percentile range (only applied to non-zero voxels)
+    non_zero_vals = volume[mask]
+    p_low = np.percentile(non_zero_vals, percentile_low)
+    p_high = np.percentile(non_zero_vals, percentile_high)
+    clipped = np.clip(non_zero_vals, p_low, p_high)
+    
+    # Step 2: Z-score normalize on clipped values
+    mean = np.mean(clipped)
+    std = np.std(clipped)
     
     if std == 0:
         normalized[mask] = 0.0
     else:
-        normalized[mask] = (volume[mask] - mean) / std
+        normalized[mask] = (clipped - mean) / (std + 1e-8)
     
     return normalized
 

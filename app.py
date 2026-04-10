@@ -43,6 +43,11 @@ def load_aggregation_params(config_path="outputs/calibration/aggregation_calibra
         "min_suspicious_slices": 8,
         "suspicious_prob_threshold": 0.90,
         "min_suspicious_fraction": 0.30,
+        "healthy_override_topk_max": 0.20,
+        "healthy_override_max_suspicious_slices": 3,
+        "healthy_override_max_suspicious_fraction": 0.05,
+        "hard_tumor_topk_min": 0.95,
+        "hard_tumor_min_suspicious_slices": 3,
     }
 
     path = Path(config_path)
@@ -209,6 +214,14 @@ def create_heatmap_rgb(cam):
     heatmap_bgr = cv2.applyColorMap(cam_uint8, cv2.COLORMAP_JET)
     heatmap_rgb = cv2.cvtColor(heatmap_bgr, cv2.COLOR_BGR2RGB)
     return heatmap_rgb
+
+
+def create_blank_heatmap_and_overlay(normalized_slice):
+    h, w = normalized_slice.shape
+    blank_heatmap = np.zeros((h, w, 3), dtype=np.uint8)
+    base = np.stack([normalized_slice] * 3, axis=-1)
+    base = (base * 255).astype(np.uint8) if base.max() <= 1 else base.astype(np.uint8)
+    return blank_heatmap, base
 
 
 def create_probability_graph(predictions, theme_mode="dark"):
@@ -456,10 +469,15 @@ def main():
         
         if show_gradcam:
             st.subheader("Explainability Analysis")
-            
-            cam = generate_gradcam(model, device, slice_tensor)
-            heatmap_rgb = create_heatmap_rgb(cam)
-            overlay = create_overlay(normalized_slice, cam, alpha=0.4)
+
+            suppress_gradcam = (decision["prediction"] == 0 and pred == 0)
+            if suppress_gradcam:
+                heatmap_rgb, overlay = create_blank_heatmap_and_overlay(normalized_slice)
+                cam = np.zeros_like(normalized_slice, dtype=np.float32)
+            else:
+                cam = generate_gradcam(model, device, slice_tensor)
+                heatmap_rgb = create_heatmap_rgb(cam)
+                overlay = create_overlay(normalized_slice, cam, alpha=0.4)
 
             display_size = (360, 360)
             original_display = cv2.resize(normalized_slice, display_size, interpolation=cv2.INTER_LINEAR)
@@ -480,10 +498,13 @@ def main():
                 st.markdown("**MRI + Grad-CAM Overlay**")
                 st.image(overlay_display, width="stretch", clamp=True)
             
-            st.info(
-                "The Grad-CAM heatmap highlights regions the AI focuses on when predicting. "
-                "Brighter colors indicate higher importance for the prediction."
-            )
+            if suppress_gradcam:
+                st.info("Grad-CAM is suppressed for healthy predictions to avoid false visual highlights.")
+            else:
+                st.info(
+                    "The Grad-CAM heatmap highlights regions the AI focuses on when predicting. "
+                    "Brighter colors indicate higher importance for the prediction."
+                )
             
             try:
                 gradcam_panel = create_gradcam_panel(normalized_slice, heatmap_rgb, overlay)

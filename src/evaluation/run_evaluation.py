@@ -1,5 +1,6 @@
 import torch
 from torch.utils.data import DataLoader
+import argparse
 from src.aggregation.topk_aggregation import topk_patient_prediction, get_patient_labels
 from src.evaluation.predictor import Predictor
 from src.evaluation.metrics import compute_classification_metrics
@@ -29,6 +30,17 @@ def load_dataset(path):
         return pickle.load(f)
 
 
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Run model evaluation")
+    parser.add_argument("--dataset_path", type=str, default="data/dataset_records.pkl.gz")
+    parser.add_argument("--checkpoint_path", type=str, default=None)
+    parser.add_argument("--eval_scope", type=str, default="val", choices=["val", "all"])
+    parser.add_argument("--target_size", type=int, default=224)
+    parser.add_argument("--center_crop_size", type=int, default=180)
+    parser.add_argument("--batch_size", type=int, default=32)
+    return parser.parse_args()
+
+
 def get_latest_checkpoint(checkpoint_dir="outputs/checkpoints"):
     checkpoint_dir = Path(checkpoint_dir)
     candidates = list(checkpoint_dir.glob("*.pth"))
@@ -46,6 +58,11 @@ def load_aggregation_params(config_path="outputs/calibration/aggregation_calibra
         "min_suspicious_slices": 8,
         "suspicious_prob_threshold": 0.90,
         "min_suspicious_fraction": 0.30,
+        "healthy_override_topk_max": 0.20,
+        "healthy_override_max_suspicious_slices": 3,
+        "healthy_override_max_suspicious_fraction": 0.05,
+        "hard_tumor_topk_min": 0.95,
+        "hard_tumor_min_suspicious_slices": 3,
     }
     path = Path(config_path)
     if not path.exists():
@@ -65,18 +82,24 @@ def select_representative_slice_index(records, preferred_label=None):
     best_idx = 0
     best_score = -1
 
+    def _brain_pixels(rec):
+        sl = rec.get("slice")
+        if sl is None:
+            return 0
+        return int(np.count_nonzero(sl))
+
     for idx, record in enumerate(records):
         if preferred_label is not None and record["label"] != preferred_label:
             continue
 
-        brain_pixels = int(np.count_nonzero(record["slice"]))
+        brain_pixels = _brain_pixels(record)
         if brain_pixels > best_score:
             best_score = brain_pixels
             best_idx = idx
 
     if best_score < 0:
         for idx, record in enumerate(records):
-            brain_pixels = int(np.count_nonzero(record["slice"]))
+            brain_pixels = _brain_pixels(record)
             if brain_pixels > best_score:
                 best_score = brain_pixels
                 best_idx = idx
@@ -108,25 +131,67 @@ def select_highest_tumor_probability_slice_index(records, probabilities, preferr
     return best_idx
 
 
+def print_dataset_breakdown(records, title):
+    dataset_counts = Counter([str(r.get("dataset", "unknown")).lower() for r in records])
+    print(f"\n===== {title} Dataset Breakdown =====")
+    for name, count in sorted(dataset_counts.items()):
+        print(f"{name}: {count}")
+    print("================================")
+
+
+def maybe_report_dataset_metrics(records, probs, preds, title_prefix):
+    labels = [int(r["label"]) for r in records]
+    if len(set(labels)) < 2:
+        print(f"\n===== {title_prefix} =====")
+        print("Skipped full metric report: only one class present in ground truth.")
+        print(f"Ground truth distribution: {Counter(labels)}")
+        print(f"Prediction distribution: {Counter(preds)}")
+        return
+
+    metrics = compute_classification_metrics(labels, preds, probs)
+    print(f"\n===== {title_prefix} =====")
+    generate_report(metrics)
+
+
 def main():
+
+    args = parse_arguments()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    dataset_records = load_dataset("data/dataset_records.pkl.gz")
+    dataset_records = load_dataset(args.dataset_path)
 
     train_records, val_records = split_dataset_by_patient(dataset_records)
+    eval_records = dataset_records if args.eval_scope == "all" else val_records
 
     print("\n===== DATA DISTRIBUTION =====")
     print("Train:", Counter([r["label"] for r in train_records]))
     print("Val:", Counter([r["label"] for r in val_records]))
+    if args.eval_scope == "all":
+        print("Eval scope: all records")
+        print("Eval:", Counter([r["label"] for r in eval_records]))
+    else:
+        print("Eval scope: validation split")
     print("================================\n")
 
-    val_transform = build_eval_transform(target_size=224, center_crop_size=180)
-    val_dataset = MRISliceDataset(val_records, target_size=224, transform=val_transform)
-    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+    print_dataset_breakdown(train_records, "Train")
+    print_dataset_breakdown(val_records, "Val")
+    print_dataset_breakdown(eval_records, "Eval")
 
-    checkpoint_path = get_latest_checkpoint("outputs/checkpoints")
+    val_transform = build_eval_transform(
+        target_size=args.target_size,
+        center_crop_size=args.center_crop_size,
+    )
+    val_dataset = MRISliceDataset(
+        eval_records,
+        target_size=args.target_size,
+        transform=val_transform,
+        channel_mode="2.5d",
+    )
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
+
+    checkpoint_path = args.checkpoint_path or get_latest_checkpoint("outputs/checkpoints")
     print(f"Using checkpoint: {checkpoint_path}")
 
     predictor = Predictor.load_from_checkpoint(
@@ -138,7 +203,7 @@ def main():
 
     aggregation_params = load_aggregation_params()
     patient_preds = topk_patient_prediction(
-        records=val_records,
+        records=eval_records,
         probs=outputs["probabilities"],
         k=aggregation_params["top_k"],
         threshold=aggregation_params["threshold"],
@@ -148,7 +213,7 @@ def main():
         min_suspicious_fraction=aggregation_params["min_suspicious_fraction"],
     )
 
-    patient_labels = get_patient_labels(val_records)
+    patient_labels = get_patient_labels(eval_records)
 
     y_true = []
     y_pred = []
@@ -157,9 +222,11 @@ def main():
         y_true.append(patient_labels[pid])
         y_pred.append(patient_preds[pid])
     print("\n===== Patient Predictions =====")
-
-    for pid in patient_labels:
+    preview_ids = list(patient_labels.keys())[:25]
+    for pid in preview_ids:
         print(f"Patient: {pid} | True: {patient_labels[pid]} | Pred: {patient_preds[pid]}")
+    if len(patient_labels) > len(preview_ids):
+        print(f"... {len(patient_labels) - len(preview_ids)} more patients not shown")
 
     print("\n===== Patient-Level Evaluation =====")
 
@@ -208,7 +275,7 @@ def main():
     print(f"Calibrated threshold: {calibration.threshold:.4f}")
     generate_report(calibrated_metrics)
 
-    modalities = [str(r.get("modality", "unknown")).lower() for r in val_records]
+    modalities = [str(r.get("modality", "unknown")).lower() for r in eval_records]
     modality_calibration = calibrate_thresholds_by_modality(
         true_labels=outputs["true_labels"],
         positive_class_probs=class1_probs,
@@ -246,6 +313,23 @@ def main():
     else:
         print("Per-modality thresholds: none met calibration constraints/sample requirements")
     generate_report(modality_calibrated_metrics)
+
+    print("\n===== Per-Dataset Slice-Level Evaluation =====")
+    by_dataset_indices = {}
+    for idx, record in enumerate(eval_records):
+        dname = str(record.get("dataset", "unknown")).lower()
+        by_dataset_indices.setdefault(dname, []).append(idx)
+
+    for dname, indices in sorted(by_dataset_indices.items()):
+        d_records = [eval_records[i] for i in indices]
+        d_probs = [outputs["probabilities"][i] for i in indices]
+        d_preds = [outputs["predicted_labels"][i] for i in indices]
+        maybe_report_dataset_metrics(
+            d_records,
+            d_probs,
+            d_preds,
+            title_prefix=f"{dname.upper()} Slice-Level Evaluation",
+        )
 
     print("\n===== Grad-CAM Visualization =====")
 

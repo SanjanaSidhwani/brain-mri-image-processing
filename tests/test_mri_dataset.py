@@ -69,6 +69,36 @@ def test_dataset_auto_mode_single_channel_with_modality_records():
     assert image.shape == (1, 224, 224)
 
 
+def test_dataset_lazy_loading_for_lightweight_records(monkeypatch):
+    records = [
+        {
+            "label": 1,
+            "patient_id": "patient_1",
+            "slice_index": 1,
+            "dataset": "dummy",
+            "volume_path": "dummy_path.nii.gz",
+            "modality": "t1",
+            "to_ras": False,
+            "target_spacing": None,
+            "apply_scanner_normalization": False,
+            "use_histogram_standardization": False,
+        }
+    ]
+
+    dataset = MRISliceDataset(records, channel_mode="single", target_size=224)
+
+    fake_volume = np.zeros((32, 32, 3), dtype=np.float32)
+    fake_volume[:, :, 1] = 2.0
+
+    monkeypatch.setattr(dataset, "_get_preprocessed_volume", lambda rec: fake_volume)
+
+    image, label = dataset[0]
+
+    assert image.shape == (1, 224, 224)
+    assert torch.all(image > 0)
+    assert int(label.item()) == 1
+
+
 if __name__ == "__main__":
     test_dataset_creation()
     test_dataset_sample_format()

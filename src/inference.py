@@ -45,6 +45,11 @@ def load_aggregation_params(config_path: str = "outputs/calibration/aggregation_
         "min_suspicious_slices": 8,
         "suspicious_prob_threshold": 0.90,
         "min_suspicious_fraction": 0.30,
+        "healthy_override_topk_max": 0.20,
+        "healthy_override_max_suspicious_slices": 3,
+        "healthy_override_max_suspicious_fraction": 0.05,
+        "hard_tumor_topk_min": 0.95,
+        "hard_tumor_min_suspicious_slices": 3,
     }
 
     path = Path(config_path)

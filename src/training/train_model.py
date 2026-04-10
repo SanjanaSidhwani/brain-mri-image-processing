@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -57,6 +58,23 @@ def parse_arguments():
         type=float,
         default=0.0,
         help="Probability of dropping each modality channel during training in multimodal mode"
+    )
+    parser.add_argument(
+        "--volume_cache_size",
+        type=int,
+        default=32,
+        help="How many preprocessed volumes each dataset instance keeps cached in memory"
+    )
+    parser.add_argument(
+        "--train_subset_fraction",
+        type=float,
+        default=1.0,
+        help="Fraction of training records to use per epoch for a faster warm-start run"
+    )
+    parser.add_argument(
+        "--balanced_train_sampling",
+        action="store_true",
+        help="Use weighted sampling so tumor and healthy slices are sampled with equal probability"
     )
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--random_seed", type=int, default=42)
@@ -181,6 +199,67 @@ def print_model_info(model, device):
     print("=" * 60 + "\n")
 
 
+def resolve_global_modality_order(records):
+    modalities = sorted(
+        {
+            str(r.get("modality")).lower()
+            for r in records
+            if r.get("modality") is not None and str(r.get("modality")).strip() != ""
+        }
+    )
+    return modalities
+
+
+def select_train_subset(records, subset_fraction: float, seed: int):
+    if subset_fraction >= 1.0:
+        return records
+
+    if subset_fraction <= 0.0:
+        raise ValueError("train_subset_fraction must be greater than 0")
+
+    subset_size = max(1, int(len(records) * subset_fraction))
+    indices = list(range(len(records)))
+    rng = random.Random(seed)
+    rng.shuffle(indices)
+    selected_indices = sorted(indices[:subset_size])
+
+    return [records[i] for i in selected_indices]
+
+
+def create_balanced_train_loader(train_dataset, batch_size, num_workers, pin_memory, seed):
+    labels = [int(r["label"]) for r in train_dataset.dataset_records]
+    if not labels:
+        raise ValueError("Training dataset is empty")
+
+    from collections import Counter
+
+    class_counts = Counter(labels)
+    if 0 not in class_counts or 1 not in class_counts:
+        raise ValueError("Balanced sampling requires both classes to be present in training data")
+
+    sample_weights = [1.0 / class_counts[label] for label in labels]
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+
+    sampler = WeightedRandomSampler(
+        weights=torch.as_tensor(sample_weights, dtype=torch.double),
+        num_samples=len(labels),
+        replacement=True,
+        generator=generator,
+    )
+
+    train_loader = DataLoader(
+        dataset=train_dataset,
+        batch_size=batch_size,
+        sampler=sampler,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        drop_last=True,
+    )
+
+    return train_loader
+
+
 def main():
 
     args = parse_arguments()
@@ -221,14 +300,32 @@ def main():
             seed=args.random_seed
         )
 
+    train_records = select_train_subset(
+        train_records,
+        subset_fraction=args.train_subset_fraction,
+        seed=args.random_seed,
+    )
+
+    if args.train_subset_fraction < 1.0:
+        print(
+            f"Using training subset: {len(train_records)} records "
+            f"({args.train_subset_fraction:.0%} of the training split)"
+        )
+
     print("\n[Step 3/7] Creating datasets...")
+
+    global_modality_order = resolve_global_modality_order(dataset_records)
+    if global_modality_order:
+        print(f"Using global modality order: {global_modality_order}")
 
     train_dataset = MRISliceDataset(
         dataset_records=train_records,
         target_size=args.target_size,
         transform=None,
         channel_mode=args.channel_mode,
+        modality_order=global_modality_order if global_modality_order else None,
         modality_dropout=args.modality_dropout,
+        volume_cache_size=args.volume_cache_size,
     )
 
     val_dataset = MRISliceDataset(
@@ -236,7 +333,9 @@ def main():
         target_size=args.target_size,
         transform=None,
         channel_mode=args.channel_mode,
+        modality_order=global_modality_order if global_modality_order else None,
         modality_dropout=0.0,
+        volume_cache_size=args.volume_cache_size,
     )
 
     input_channels = train_dataset.input_channels
@@ -260,13 +359,30 @@ def main():
 
     print("[Step 4/7] Creating dataloaders...")
 
-    train_loader, val_loader = create_train_val_dataloaders(
-        train_dataset=train_dataset,
-        val_dataset=val_dataset,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=(device.type == "cuda")
-    )
+    if args.balanced_train_sampling:
+        train_loader = create_balanced_train_loader(
+            train_dataset=train_dataset,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            pin_memory=(device.type == "cuda"),
+            seed=args.random_seed,
+        )
+        _, val_loader = create_train_val_dataloaders(
+            train_dataset=train_dataset,
+            val_dataset=val_dataset,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            pin_memory=(device.type == "cuda"),
+        )
+        print("Using balanced train sampling (WeightedRandomSampler)")
+    else:
+        train_loader, val_loader = create_train_val_dataloaders(
+            train_dataset=train_dataset,
+            val_dataset=val_dataset,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            pin_memory=(device.type == "cuda")
+        )
 
     print("[Step 5/7] Initializing model...")
 
@@ -291,7 +407,10 @@ def main():
 
     class_weights = torch.tensor([weight_0, weight_1], dtype=torch.float32).to(device)
 
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    if args.balanced_train_sampling:
+        criterion = nn.CrossEntropyLoss()
+    else:
+        criterion = nn.CrossEntropyLoss(weight=class_weights)
 
     optimizer = optim.Adam(
         model.parameters(),

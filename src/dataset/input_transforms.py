@@ -24,13 +24,20 @@ def build_patient_index(dataset: List[Dict]) -> Dict[str, List[Dict]]:
             patient_index[pid] = {
                 "all": [],
                 "by_modality": {},
+                "slice_cache": {},
+                "modality_slice_cache": {},
             }
 
         if modality not in patient_index[pid]["by_modality"]:
             patient_index[pid]["by_modality"][modality] = []
+        if modality not in patient_index[pid]["modality_slice_cache"]:
+            patient_index[pid]["modality_slice_cache"][modality] = {}
 
         patient_index[pid]["all"].append(record)
         patient_index[pid]["by_modality"][modality].append(record)
+        if record.get("slice") is not None:
+            patient_index[pid]["slice_cache"][record["slice_index"]] = record["slice"]
+            patient_index[pid]["modality_slice_cache"][modality][record["slice_index"]] = record["slice"]
 
     for pid in patient_index:
         patient_index[pid]["all"].sort(key=lambda x: x["slice_index"])
@@ -40,17 +47,53 @@ def build_patient_index(dataset: List[Dict]) -> Dict[str, List[Dict]]:
     return patient_index
 
 
-def stack_2_5d(record: Dict, patient_slices: List[Dict], apply_skull_strip: bool = True) -> np.ndarray:
+def _get_slice(record: Dict, fetch_slice_fn=None) -> np.ndarray:
+    sl = record.get("slice")
+    if sl is not None:
+        return sl
+
+    if fetch_slice_fn is None:
+        raise KeyError("Record has no 'slice' data and no fetch_slice_fn was provided")
+
+    return fetch_slice_fn(record)
+
+
+def _resolve_reference_slice(records: List[Dict], fetch_slice_fn=None) -> np.ndarray:
+    for candidate in records:
+        sl = _get_slice(candidate, fetch_slice_fn=fetch_slice_fn)
+        if sl is not None:
+            return np.asarray(sl, dtype=np.float32)
+
+    raise ValueError("Unable to resolve a reference slice for stacking")
+
+
+def stack_2_5d(
+    record: Dict,
+    patient_slices: List[Dict],
+    patient_info: Optional[Dict] = None,
+    apply_skull_strip: bool = True,
+    fetch_slice_fn=None,
+) -> np.ndarray:
  
     current_index = record["slice_index"]
-    slice_map = {r["slice_index"]: r["slice"] for r in patient_slices}
+    if patient_info is not None and "slice_cache" in patient_info:
+        slice_map = patient_info["slice_cache"]
+    else:
+        slice_map = {r["slice_index"]: _get_slice(r, fetch_slice_fn=fetch_slice_fn) for r in patient_slices}
 
-    h, w = record["slice"].shape
+    reference_slice = _get_slice(record, fetch_slice_fn=fetch_slice_fn)
+    if reference_slice is None:
+        reference_slice = _resolve_reference_slice(patient_slices, fetch_slice_fn=fetch_slice_fn)
+
+    h, w = np.asarray(reference_slice).shape
     zero_slice = np.zeros((h, w), dtype=np.float32)
 
     prev_slice = slice_map.get(current_index - 1, zero_slice)
     curr_slice = slice_map.get(current_index)
     next_slice = slice_map.get(current_index + 1, zero_slice)
+
+    if curr_slice is None:
+        curr_slice = reference_slice if reference_slice.shape == (h, w) else zero_slice
 
     if apply_skull_strip:
         prev_slice = strip_skull(prev_slice, margin=20)
@@ -62,8 +105,8 @@ def stack_2_5d(record: Dict, patient_slices: List[Dict], apply_skull_strip: bool
     return stacked
 
 
-def stack_single_channel(record: Dict, apply_skull_strip: bool = True) -> np.ndarray:
-    curr_slice = record["slice"]
+def stack_single_channel(record: Dict, apply_skull_strip: bool = True, fetch_slice_fn=None) -> np.ndarray:
+    curr_slice = _get_slice(record, fetch_slice_fn=fetch_slice_fn)
     if apply_skull_strip:
         curr_slice = strip_skull(curr_slice, margin=20)
     return curr_slice
@@ -72,22 +115,34 @@ def stack_single_channel(record: Dict, apply_skull_strip: bool = True) -> np.nda
 def stack_multimodal(
     record: Dict,
     by_modality: Dict[str, List[Dict]],
+    patient_info: Optional[Dict] = None,
     modality_order: Optional[List[str]] = None,
     apply_skull_strip: bool = True,
     modality_dropout_p: float = 0.0,
+    fetch_slice_fn=None,
 ) -> np.ndarray:
     current_index = record["slice_index"]
     modalities = modality_order or sorted(by_modality.keys())
 
     channels = []
     channel_sources = []
-    h, w = record["slice"].shape
+    reference_slice = _get_slice(record, fetch_slice_fn=fetch_slice_fn)
+    if reference_slice is None:
+        reference_slice = _resolve_reference_slice(by_modality.get(modalities[0], []) if modalities else [], fetch_slice_fn=fetch_slice_fn)
+
+    h, w = np.asarray(reference_slice).shape
     zero_slice = np.zeros((h, w), dtype=np.float32)
 
     for modality in modalities:
         recs = by_modality.get(modality, [])
-        mapping = {r["slice_index"]: r["slice"] for r in recs}
+        if patient_info is not None and "modality_slice_cache" in patient_info:
+            mapping = patient_info["modality_slice_cache"].get(modality, {})
+        else:
+            mapping = {r["slice_index"]: _get_slice(r, fetch_slice_fn=fetch_slice_fn) for r in recs}
         sl = mapping.get(current_index, zero_slice)
+
+        if sl is None:
+            sl = zero_slice
 
         if sl.shape != (h, w):
             sl = cv2.resize(sl.astype(np.float32), (w, h), interpolation=cv2.INTER_LINEAR)
@@ -134,6 +189,7 @@ def transform_record(
     channel_mode: str = "2.5d",
     modality_order: Optional[List[str]] = None,
     modality_dropout_p: float = 0.0,
+    fetch_slice_fn=None,
 ) -> np.ndarray:
 
     pid = record["patient_id"]
@@ -143,18 +199,30 @@ def transform_record(
 
     mode = channel_mode.lower()
     if mode == "single":
-        stacked = stack_single_channel(record, apply_skull_strip=apply_skull_strip)
+        stacked = stack_single_channel(
+            record,
+            apply_skull_strip=apply_skull_strip,
+            fetch_slice_fn=fetch_slice_fn,
+        )
     elif mode == "multimodal":
         stacked = stack_multimodal(
             record,
             by_modality=by_modality,
+            patient_info=patient_info,
             modality_order=modality_order,
             apply_skull_strip=apply_skull_strip,
             modality_dropout_p=modality_dropout_p,
+            fetch_slice_fn=fetch_slice_fn,
         )
     else:
         # Legacy default behavior.
-        stacked = stack_2_5d(record, patient_slices, apply_skull_strip=apply_skull_strip)
+        stacked = stack_2_5d(
+            record,
+            patient_slices,
+            patient_info=patient_info,
+            apply_skull_strip=apply_skull_strip,
+            fetch_slice_fn=fetch_slice_fn,
+        )
 
     if pre_resize:
         return resize_image(stacked, target_size)

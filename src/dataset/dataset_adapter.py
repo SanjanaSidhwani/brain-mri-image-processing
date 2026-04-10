@@ -41,6 +41,8 @@ class BratsAdapter(DatasetAdapter):
             if not patient.is_dir():
                 continue
             for file in patient.glob("*.nii*"):
+                if "seg" in file.name.lower():
+                    continue
                 modality = detect_modality(str(file))
                 samples.append(
                     VolumeSample(

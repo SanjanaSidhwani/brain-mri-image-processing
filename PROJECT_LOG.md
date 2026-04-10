@@ -770,3 +770,77 @@
 - IXI files are now usable end-to-end by the current pipeline after archive extraction and stacking fix.
 - Multimodal channel construction became resilient to modality-specific slice shape differences.
 - External validation path is now stronger for cross-dataset robustness checks.
+
+---
+
+## Step 21 - Sequential Reliability Fix Validation and 4-Dataset Evaluation (Completed)
+
+## Step 21.1 - Sequential Step-Wise Reliability Fixing (Completed)
+
+### Actions
+- Applied reliability fixes in strict sequence with evaluation after each step.
+- Step 1: Updated intensity normalization to percentile-clipped Z-score on non-zero voxels.
+- Rebuilt dataset records with the updated preprocessing path.
+- Ran quick probes and evaluations to validate specificity behavior before moving to the next fix.
+- Step 2: Enabled balanced training sampling using WeightedRandomSampler for class-balanced slice exposure.
+
+### Files Added/Modified
+- Modified: src/preprocessing/volume_utils.py
+- Modified: src/training/train_model.py
+
+### Outcome
+- Sequential experimentation workflow was preserved without mixing fixes.
+- Step 1 improved healthy-domain behavior but did not fully satisfy all patient-level targets alone.
+- Step 2 balancing logic was integrated and validated through a new short-cycle training run.
+
+---
+
+## Step 21.2 - Step 2 Two-Epoch Training Run (Completed)
+
+### Actions
+- Executed a two-epoch training run using balanced sampling.
+- Trained with a fast subset fraction for quick-turn validation.
+- Saved a dedicated checkpoint for direct comparison against Step 1 probes.
+
+### Files Added/Modified
+- Added/Modified: outputs/checkpoints/step2_balanced_2ep
+
+### Outcome
+- Training completed successfully with stable train/validation progression.
+- Produced a reproducible checkpoint for external healthy/tumor verification.
+
+---
+
+## Step 21.3 - Full Four-Dataset Evaluation (BraTS2020, BraTS2021, OASIS, IXI) (Completed)
+
+### Actions
+- Ran dataset-specific evaluation scripts against the Step 2 checkpoint for:
+	- BraTS2020
+	- BraTS2021
+	- OASIS
+	- IXI
+- Generated per-dataset JSON reports with slice-level and patient-level metrics.
+- Aggregated confusion matrices across all four datasets for overall model-level summary.
+
+### Files Added/Modified
+- Added/Modified: scripts/evaluate_ixi_model.py
+- Added/Modified: outputs/reports/step2_2ep_brats2020.json
+- Added/Modified: outputs/reports/step2_2ep_brats2021.json
+- Added/Modified: outputs/reports/step2_2ep_oasis.json
+- Added/Modified: outputs/reports/step2_2ep_ixi.json
+
+### Outcome
+- Patient-level combined confusion matrix across 4 datasets:
+	- [[776, 2], [0, 1620]]
+- Patient-level overall metrics:
+	- Accuracy: 0.9992
+	- Sensitivity: 1.0000
+	- Specificity: 0.9974
+- Slice-level combined confusion matrix across 4 datasets:
+	- [[308491, 11503], [297, 792703]]
+- Slice-level overall metrics:
+	- Accuracy: 0.9894
+	- Sensitivity: 0.9996
+	- Specificity: 0.9641
+
+---

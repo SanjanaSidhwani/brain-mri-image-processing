@@ -18,21 +18,36 @@ def create_slice_record(
     patient_id,
     slice_index,
     dataset_name,
+    volume_path=None,
     modality="unknown",
     field_strength_t=None,
     voxel_spacing=None,
+    to_ras=True,
+    target_spacing=(1.0, 1.0, 1.0),
+    apply_scanner_normalization=True,
+    use_histogram_standardization=False,
+    include_slice_data=True,
 ):
-    return {
-        "slice": slice_2d,
+    record = {
         "label": label,
         "patient_id": patient_id,
         "slice_index": slice_index,  
         "dataset": dataset_name,
+        "volume_path": volume_path,
         "modality": modality,
         "modalities": [modality],
         "field_strength_t": field_strength_t,
         "voxel_spacing": voxel_spacing,
+        "to_ras": bool(to_ras),
+        "target_spacing": target_spacing,
+        "apply_scanner_normalization": bool(apply_scanner_normalization),
+        "use_histogram_standardization": bool(use_histogram_standardization),
     }
+
+    if include_slice_data:
+        record["slice"] = slice_2d
+
+    return record
 
 
 def _normalize_volume_entry(volume_item):
@@ -76,10 +91,16 @@ def build_volume_dataset(
     label,
     patient_id,
     dataset_name,
+    volume_path,
     threshold=0.05,
     modality="unknown",
     field_strength_t=None,
     voxel_spacing=None,
+    to_ras=True,
+    target_spacing=(1.0, 1.0, 1.0),
+    apply_scanner_normalization=True,
+    use_histogram_standardization=False,
+    include_slice_data=True,
 ):
     
     if volume.ndim != 3:
@@ -101,9 +122,15 @@ def build_volume_dataset(
                 patient_id=patient_id,
                 slice_index=original_index, 
                 dataset_name=dataset_name,
+                volume_path=volume_path,
                 modality=modality,
                 field_strength_t=field_strength_t,
                 voxel_spacing=voxel_spacing,
+                to_ras=to_ras,
+                target_spacing=target_spacing,
+                apply_scanner_normalization=apply_scanner_normalization,
+                use_histogram_standardization=use_histogram_standardization,
+                include_slice_data=include_slice_data,
             )
             
             slice_records.append(record)
@@ -115,10 +142,17 @@ def build_dataset_from_volumes(
     list_of_volumes,
     threshold=0.05,
     target_spacing=(1.0, 1.0, 1.0),
+    to_ras=True,
+    apply_scanner_normalization=True,
     use_histogram_standardization=False,
     histogram_landmarks=None,
+    record_mode="full",
 ):
-    
+    if record_mode not in {"full", "lightweight"}:
+        raise ValueError("record_mode must be one of {'full', 'lightweight'}")
+
+    include_slice_data = record_mode == "full"
+
     master_dataset = []
     
     for volume_item in list_of_volumes:
@@ -126,7 +160,7 @@ def build_dataset_from_volumes(
 
         volume, meta = load_nifti(
             entry["volume_path"],
-            to_ras=True,
+            to_ras=to_ras,
             target_spacing=target_spacing,
             return_metadata=True,
         )
@@ -136,7 +170,8 @@ def build_dataset_from_volumes(
         if field_strength_t is None:
             field_strength_t = meta.get("field_strength_t")
 
-        volume = normalize_by_scanner_strength(volume, field_strength_t)
+        if apply_scanner_normalization:
+            volume = normalize_by_scanner_strength(volume, field_strength_t)
         if use_histogram_standardization:
             volume = apply_optional_histogram_standardization(
                 volume=volume,
@@ -151,10 +186,16 @@ def build_dataset_from_volumes(
             label=entry["label"],
             patient_id=entry["patient_id"],
             dataset_name=entry["dataset_name"],
+            volume_path=entry["volume_path"],
             threshold=threshold,
             modality=modality,
             field_strength_t=field_strength_t,
             voxel_spacing=meta.get("voxel_spacing"),
+            to_ras=to_ras,
+            target_spacing=target_spacing,
+            apply_scanner_normalization=apply_scanner_normalization,
+            use_histogram_standardization=use_histogram_standardization,
+            include_slice_data=include_slice_data,
         )
         
         master_dataset.extend(slice_records)

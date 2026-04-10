@@ -30,6 +30,11 @@ def robust_patient_prediction_from_tumor_probs(
     min_suspicious_slices=8,
     suspicious_prob_threshold=0.90,
     min_suspicious_fraction=0.30,
+    healthy_override_topk_max=0.20,
+    healthy_override_max_suspicious_slices=3,
+    healthy_override_max_suspicious_fraction=0.05,
+    hard_tumor_topk_min=0.95,
+    hard_tumor_min_suspicious_slices=3,
 ):
     topk_score = aggregate_patient_tumor_score(
         tumor_probs=tumor_probs,
@@ -47,13 +52,33 @@ def robust_patient_prediction_from_tumor_probs(
 
     risk_score = float(0.5 * topk_score + 0.5 * fraction_strength)
 
-    is_tumor = (
+    base_tumor_rule = (
         (topk_score >= float(threshold))
         and (suspicious_count >= int(min_suspicious_slices))
         and (suspicious_fraction >= float(min_suspicious_fraction))
     )
-    prediction = 1 if is_tumor else 0
-    confidence = risk_score if is_tumor else max(1.0 - suspicious_fraction, 1.0 - topk_score)
+
+    # Safety valve: if the tumor signal is extremely strong, never override to healthy.
+    hard_tumor_rule = (
+        (topk_score >= float(hard_tumor_topk_min))
+        and (suspicious_count >= int(hard_tumor_min_suspicious_slices))
+    )
+
+    # Conservative healthy override for very weak and sparse tumor evidence.
+    healthy_override_rule = (
+        (topk_score <= float(healthy_override_topk_max))
+        and (suspicious_count <= int(healthy_override_max_suspicious_slices))
+        and (suspicious_fraction <= float(healthy_override_max_suspicious_fraction))
+    )
+
+    if hard_tumor_rule:
+        prediction = 1
+    elif healthy_override_rule:
+        prediction = 0
+    else:
+        prediction = 1 if base_tumor_rule else 0
+
+    confidence = risk_score if prediction == 1 else max(1.0 - suspicious_fraction, 1.0 - topk_score)
 
     return {
         "prediction": prediction,
@@ -62,6 +87,9 @@ def robust_patient_prediction_from_tumor_probs(
         "confidence": float(confidence),
         "suspicious_slices": suspicious_count,
         "suspicious_fraction": suspicious_fraction,
+        "base_tumor_rule": bool(base_tumor_rule),
+        "hard_tumor_rule": bool(hard_tumor_rule),
+        "healthy_override_rule": bool(healthy_override_rule),
         "threshold": float(threshold),
         "top_k": int(top_k),
         "method": method,
@@ -77,6 +105,11 @@ def topk_patient_prediction(
     min_suspicious_slices=8,
     suspicious_prob_threshold=0.90,
     min_suspicious_fraction=0.30,
+    healthy_override_topk_max=0.20,
+    healthy_override_max_suspicious_slices=3,
+    healthy_override_max_suspicious_fraction=0.05,
+    hard_tumor_topk_min=0.95,
+    hard_tumor_min_suspicious_slices=3,
 ):
     
     patient_dict = defaultdict(list)
@@ -101,6 +134,11 @@ def topk_patient_prediction(
             min_suspicious_slices=min_suspicious_slices,
             suspicious_prob_threshold=suspicious_prob_threshold,
             min_suspicious_fraction=min_suspicious_fraction,
+            healthy_override_topk_max=healthy_override_topk_max,
+            healthy_override_max_suspicious_slices=healthy_override_max_suspicious_slices,
+            healthy_override_max_suspicious_fraction=healthy_override_max_suspicious_fraction,
+            hard_tumor_topk_min=hard_tumor_topk_min,
+            hard_tumor_min_suspicious_slices=hard_tumor_min_suspicious_slices,
         )
         prediction = decision["prediction"]
 

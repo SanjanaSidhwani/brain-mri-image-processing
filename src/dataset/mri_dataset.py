@@ -2,8 +2,14 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 from typing import List, Dict, Tuple, Optional
+from collections import OrderedDict
 
 from .input_transforms import build_patient_index, transform_record
+from ..preprocessing.volume_utils import load_nifti, zscore_normalize
+from ..preprocessing.scanner_normalization import (
+    apply_optional_histogram_standardization,
+    normalize_by_scanner_strength,
+)
 
 
 class MRISliceDataset(Dataset):
@@ -16,6 +22,8 @@ class MRISliceDataset(Dataset):
         channel_mode: str = "auto",
         modality_order: Optional[List[str]] = None,
         modality_dropout: float = 0.0,
+        lazy_load_missing_slices: bool = True,
+        volume_cache_size: int = 8,
     ):
         self.dataset_records = dataset_records
         self.target_size = target_size
@@ -23,6 +31,9 @@ class MRISliceDataset(Dataset):
         self.channel_mode = channel_mode
         self.modality_order = modality_order
         self.modality_dropout = modality_dropout
+        self.lazy_load_missing_slices = lazy_load_missing_slices
+        self.volume_cache_size = max(1, int(volume_cache_size))
+        self._volume_cache = OrderedDict()
 
         self.patient_index = build_patient_index(dataset_records)
         self.modalities = sorted({r.get("modality") for r in dataset_records if r.get("modality")})
@@ -68,6 +79,7 @@ class MRISliceDataset(Dataset):
             channel_mode=self.resolved_channel_mode,
             modality_order=self.modality_order,
             modality_dropout_p=self.modality_dropout,
+            fetch_slice_fn=self._get_slice_for_record,
         )
 
         image = self._to_tensor(image)
@@ -78,6 +90,85 @@ class MRISliceDataset(Dataset):
         label = torch.tensor(record["label"], dtype=torch.long)
 
         return image, label
+
+    def _get_slice_for_record(self, record: Dict) -> np.ndarray:
+        sl = record.get("slice")
+        if sl is not None:
+            return np.asarray(sl, dtype=np.float32)
+
+        if not self.lazy_load_missing_slices:
+            raise KeyError("Record does not contain 'slice' and lazy loading is disabled")
+
+        volume = self._get_preprocessed_volume(record)
+        slice_index = int(record["slice_index"])
+        if slice_index < 0 or slice_index >= volume.shape[2]:
+            raise IndexError(
+                f"slice_index {slice_index} out of bounds for volume with depth {volume.shape[2]}"
+            )
+
+        return np.asarray(volume[:, :, slice_index], dtype=np.float32)
+
+    def _cache_key(self, record: Dict) -> Tuple:
+        target_spacing = record.get("target_spacing")
+        if isinstance(target_spacing, list):
+            target_spacing = tuple(target_spacing)
+
+        return (
+            str(record.get("volume_path", "")),
+            bool(record.get("to_ras", True)),
+            target_spacing,
+            bool(record.get("apply_scanner_normalization", False)),
+            bool(record.get("use_histogram_standardization", False)),
+            str(record.get("modality", "unknown") or "unknown"),
+            record.get("field_strength_t", None),
+        )
+
+    def _get_preprocessed_volume(self, record: Dict) -> np.ndarray:
+        volume_path = record.get("volume_path")
+        if not volume_path:
+            raise KeyError("Record is missing 'volume_path' required for lazy loading")
+
+        key = self._cache_key(record)
+        cached = self._volume_cache.get(key)
+        if cached is not None:
+            self._volume_cache.move_to_end(key)
+            return cached
+
+        target_spacing = record.get("target_spacing")
+        if isinstance(target_spacing, list):
+            target_spacing = tuple(target_spacing)
+
+        volume, meta = load_nifti(
+            volume_path,
+            to_ras=bool(record.get("to_ras", True)),
+            target_spacing=target_spacing,
+            return_metadata=True,
+        )
+
+        modality = record.get("modality") or meta.get("modality") or "unknown"
+        field_strength_t = record.get("field_strength_t")
+        if field_strength_t is None:
+            field_strength_t = meta.get("field_strength_t")
+
+        if bool(record.get("apply_scanner_normalization", False)):
+            volume = normalize_by_scanner_strength(volume, field_strength_t)
+
+        if bool(record.get("use_histogram_standardization", False)):
+            volume = apply_optional_histogram_standardization(
+                volume=volume,
+                modality=modality,
+                landmark_map=None,
+            )
+
+        normalized = zscore_normalize(volume).astype(np.float32, copy=False)
+
+        self._volume_cache[key] = normalized
+        self._volume_cache.move_to_end(key)
+
+        while len(self._volume_cache) > self.volume_cache_size:
+            self._volume_cache.popitem(last=False)
+
+        return normalized
 
     def _to_tensor(self, image: np.ndarray) -> torch.Tensor:
         if image.ndim == 2:

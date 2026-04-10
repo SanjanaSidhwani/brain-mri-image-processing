@@ -15,12 +15,28 @@ def robust_intensity_scale(volume: np.ndarray, low_q: float = 1.0, high_q: float
     if not np.any(mask):
         return scaled
 
-    lo = np.percentile(scaled[mask], low_q)
-    hi = np.percentile(scaled[mask], high_q)
+    values = scaled[mask]
+
+    # Guard against memory pressure on large volumes by percentile estimation from a sample.
+    max_percentile_samples = 200_000
+    if values.size > max_percentile_samples:
+        step = int(np.ceil(values.size / max_percentile_samples))
+        values = values[::step]
+
+    lo = np.percentile(values, low_q)
+    hi = np.percentile(values, high_q)
     if hi <= lo:
         return scaled
 
-    scaled[mask] = np.clip((scaled[mask] - lo) / (hi - lo), 0.0, 1.0)
+    denom = float(hi - lo)
+    if denom <= 0:
+        return scaled
+
+    # In-place arithmetic to reduce memory spikes on large volumes.
+    np.subtract(scaled, lo, out=scaled)
+    np.divide(scaled, denom, out=scaled, where=mask)
+    np.clip(scaled, 0.0, 1.0, out=scaled)
+    scaled[~mask] = 0.0
     return scaled
 
 
