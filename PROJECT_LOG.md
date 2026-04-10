@@ -2,6 +2,31 @@
 
 ---
 
+## Step 22 - Streamlit Inference Alignment and OASIS Stability Hardening (Completed)
+
+### Actions
+- Updated Streamlit checkpoint resolution to prioritize the evaluated Step 2 artifact (`outputs/checkpoints/step2_balanced_2ep`) and fall back safely when unavailable.
+- Added checkpoint-aware aggregation guard so `outputs/calibration/aggregation_calibration.json` is only applied when its recorded checkpoint matches the currently loaded checkpoint.
+- Added evaluation-aligned aggregation fallback defaults in app runtime to prevent cross-checkpoint calibration drift.
+- Aligned app preprocessing with model training/evaluation behavior:
+	- filtered non-informative slices using `filter_empty_slices(..., threshold=0.05)`
+	- switched 3-channel inference input from repeated single-slice channels to true 2.5D neighbor stacking (`prev, current, next`)
+- Updated slice slider default behavior:
+	- tumor prediction -> highest tumor-confidence slice
+	- healthy prediction -> strongest non-tumor-confidence slice
+- Refined healthy-case explainability rendering to keep Grad-CAM panels visually neutral (no highlighted regions) while preserving original MRI context.
+- Added in-app checkpoint visibility caption for auditability during debugging.
+
+### Files Added/Modified
+- Modified: app.py
+
+### Outcome
+- Streamlit patient-level decisions are now consistent with the intended evaluation configuration and no longer use calibration artifacts from unrelated checkpoints.
+- OASIS behavior became more stable by removing preprocessing mismatch and aggregation drift between app runtime and report scripts.
+- UI explainability behavior now matches expected healthy-case presentation requirements.
+
+---
+
 ## Step 1 - Project Structure Initialization (Completed)
 
 ### Actions
